@@ -1,0 +1,27 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": [
+      "ES2022",
+      "WebWorker"
+    ],
+    "paths": {
+      "defuss-dbsonl": [
+        "./src/index.ts"
+      ],
+      "defuss-dbsonl/server": [
+        "./src/server.ts"
+      ],
+      "defuss-dbsonl/browser": [
+        "./src/browser.ts"
+      ]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "tests/browser/**/*.ts"
+  ],
+  "exclude": [
+    "src/server.ts"
+  ]
+}

@@ -1,0 +1,105 @@
+{
+  "package": "defuss-dbsonl@0.3.0",
+  "generatedAt": "2026-11-14T10:39:01.464Z",
+  "runtimes": [
+    {
+      "runtime": "Node",
+      "version": "v24.22.1",
+      "contracts": {
+        "memory": [
+          "typed writes and logical membership",
+          "stable read session and batched live scan",
+          "early cleanup, reopen and read-only protection",
+          "inspection and explicit tail repair",
+          "generic append, seek and physical scan"
+        ],
+        "native": [
+          "typed writes and logical membership",
+          "stable read session and batched live scan",
+          "early cleanup, reopen and read-only protection",
+          "inspection and explicit tail repair",
+          "generic append, seek and physical scan"
+        ],
+        "sync": [
+          "typed writes and logical membership",
+          "stable read session and batched live scan",
+          "early cleanup, reopen and read-only protection",
+          "inspection and explicit tail repair",
+          "generic append, seek and physical scan"
+        ]
+      }
+    },
+    {
+      "runtime": "Bun",
+      "version": "1.4.3",
+      "contracts": {
+        "memory": [
+          "typed writes and logical membership",
+          "stable read session and batched live scan",
+          "early cleanup, reopen and read-only protection",
+          "inspection and explicit tail repair",
+          "generic append, seek and physical scan"
+        ],
+        "native": [
+          "typed writes and logical membership",
+          "stable read session and batched live scan",
+          "early cleanup, reopen and read-only protection",
+          "inspection and explicit tail repair",
+          "generic append, seek and physical scan"
+        ],
+        "sync": [
+          "typed writes and logical membership",
+          "stable read session and batched live scan",
+          "early cleanup, reopen and read-only protection",
+          "inspection and explicit tail repair",
+          "generic append, seek and physical scan"
+        ]
+      }
+    }
+  ],
+  "recovery": {
+    "forcedProcessTerminationCuts": 6,
+    "fullUnacknowledgedFrameSurvived": true
+  },
+  "v2": {
+    "migration": "verified; nonempty target refused",
+    "multiProcess": "Node and Bun, v0.2 and v0.3 concurrently",
+    "increments": 60,
+    "killedProcesses": 3,
+    "atomicCrashBatches": 3,
+    "reopen": "persistent index"
+  },
+  "commonjs": [
+    "Node",
+    "Bun"
+  ],
+  "declarations": "no DOM or Node ambient types",
+  "browser": {
+    "name": "Chromium",
+    "version": "153.0.8010.0",
+    "ok": true,
+    "memory": [
+      "typed writes and logical membership",
+      "stable read session and batched live scan",
+      "early cleanup, reopen and read-only protection",
+      "inspection and explicit tail repair",
+      "generic append, seek and physical scan"
+    ],
+    "opfs": [
+      "typed writes and logical membership",
+      "stable read session and batched live scan",
+      "early cleanup, reopen and read-only protection",
+      "inspection and explicit tail repair",
+      "generic append, seek and physical scan"
+    ],
+    "directory": [
+      "typed writes and logical membership",
+      "stable read session and batched live scan",
+      "early cleanup, reopen and read-only protection",
+      "inspection and explicit tail repair",
+      "generic append, seek and physical scan"
+    ],
+    "v2": "30 concurrent worker transactions, snapshot isolation and compaction",
+    "restart": "reopened in a different worker"
+  }
+}

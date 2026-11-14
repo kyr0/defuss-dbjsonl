@@ -1,0 +1,82 @@
+{
+  "name": "defuss-dbsonl",
+  "version": "0.4.0",
+  "description": "Transactional DSON storage with a persistent copy-on-write index, MVCC snapshots, compaction and process-safe coordination.",
+  "license": "MIT",
+  "author": "Aron Homberg",
+  "type": "module",
+  "packageManager": "bun@1.4.3",
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.cts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./server": {
+      "import": {
+        "types": "./dist/server.d.mts",
+        "default": "./dist/server.mjs"
+      },
+      "require": {
+        "types": "./dist/server.d.cts",
+        "default": "./dist/server.cjs"
+      }
+    },
+    "./browser": {
+      "import": {
+        "types": "./dist/browser.d.mts",
+        "default": "./dist/browser.mjs"
+      },
+      "require": {
+        "types": "./dist/browser.d.cts",
+        "default": "./dist/browser.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "ARCH.md",
+    "docs",
+    "LICENSE",
+    "CHANGELOG.md",
+    "examples"
+  ],
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "dependencies": {
+    "@lickle/lock": "0.0.1",
+    "defuss-dson": "1.3.0",
+    "defuss-storage": "0.3.0"
+  },
+  "scripts": {
+    "build": "pkgroll --clean-dist",
+    "lint": "tsc --noEmit && tsc -p tsconfig.tools.json && oxlint --deny-warnings src tests scripts examples",
+    "test": "vitest run",
+    "coverage": "vitest run --coverage",
+    "e2e": "bun run build && bun scripts/e2e.ts",
+    "bench": "bun run build && bun scripts/bench.ts",
+    "verify": "make verify",
+    "prepublishOnly": "make verify"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.0",
+    "@vitest/coverage-v8": "4.1.12",
+    "esbuild": "0.27.4",
+    "oxlint": "1.89.0",
+    "pkgroll": "2.29.0",
+    "playwright": "1.62.1",
+    "typescript": "5.9.3",
+    "vitest": "4.1.12"
+  }
+}

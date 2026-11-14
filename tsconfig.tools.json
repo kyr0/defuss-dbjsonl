@@ -1,0 +1,36 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": [
+      "node"
+    ],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "ESNext.Disposable"
+    ],
+    "allowImportingTsExtensions": true,
+    "paths": {
+      "defuss-dbsonl": [
+        "./src/index.ts"
+      ],
+      "defuss-dbsonl/server": [
+        "./src/server.ts"
+      ],
+      "defuss-dbsonl/browser": [
+        "./src/browser.ts"
+      ]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "tests/**/*.ts",
+    "scripts/**/*.ts",
+    "examples/**/*.ts",
+    "vitest.config.ts"
+  ],
+  "exclude": [
+    "tests/consumers",
+    "tests/browser"
+  ]
+}

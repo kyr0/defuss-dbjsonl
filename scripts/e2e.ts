@@ -1,0 +1,89 @@
+/** VERIFIED: every integration run installs and consumes the packed package in tmp. */
+import { mkdir, readFile, writeFile, rm, copyFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { createServer } from 'node:http';
+import { build, transform } from 'esbuild';
+import { chromium } from 'playwright';
+import { createHash } from 'node:crypto';
+
+const root = process.cwd();
+const consumer = resolve('tmp/consumer');
+const output = resolve('output');
+const bun = process.execPath;
+const { version } = JSON.parse(await readFile('package.json', 'utf8')) as { version: string };
+function run(command: string, args: string[], cwd = root): string {
+  const result = spawnSync(command, args, { cwd, encoding: 'utf8', timeout: 120000 });
+  if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} failed:\n${result.stdout}\n${result.stderr}`);
+  return result.stdout.trim();
+}
+await mkdir(output, { recursive: true });
+await rm(consumer, { recursive: true, force: true });
+await mkdir(consumer, { recursive: true });
+run(bun, ['pm', 'pack', '--destination', output]);
+const tarball = resolve(output, `defuss-dbsonl-${version}.tgz`);
+await writeFile(resolve(consumer, 'package.json'), JSON.stringify({ name: 'dbsonl-clean-consumer', private: true, type: 'module', dependencies: { 'defuss-dbsonl': tarball } }));
+run(bun, ['install', '--ignore-scripts'], consumer);
+const compile = async (source: string, destination: string, format: 'esm' | 'cjs' = 'esm') =>
+  writeFile(resolve(consumer, destination), (await transform(await readFile(source, 'utf8'), { loader: 'ts', format, target: 'es2022' })).code);
+// Examples are taken from the installed package, proving they ship and run against its exports.
+for (const name of ['basic', 'transaction']) { await compile(resolve(consumer, `node_modules/defuss-dbsonl/examples/${name}.ts`), `${name}.js`); run('node', [`${name}.js`], consumer); }
+for (const name of ['esm', 'v2', 'v2-worker']) await compile(`tests/consumers/${name}.ts`, `${name}.js`);
+await compile('tests/consumers/v2-cjs.cts', 'v2-cjs.cjs', 'cjs');
+const runtimes = [JSON.parse(run('node', ['esm.js'], consumer)), JSON.parse(run(bun, ['esm.js'], consumer))];
+run('node', ['v2-cjs.cjs'], consumer); run(bun, ['v2-cjs.cjs'], consumer);
+// Consume the previously shipped artifact as well: format compatibility includes
+// live lock interoperability, not merely reopening a copied fixture.
+const baselineTarball = resolve('vendor/defuss-dbsonl-0.2.0.tgz');
+if (createHash('sha256').update(await readFile(baselineTarball)).digest('hex') !== '90eaf0e5e6c78cc636f6fb9273cc0475a1e2220180ecd569f97bac7ad0a3fe1b') throw new Error('Compatibility baseline checksum mismatch.');
+const baseline = resolve('tmp/compat-v020'); await mkdir(baseline, { recursive: true });
+await writeFile(resolve(baseline, 'package.json'), JSON.stringify({ name: 'dbsonl-compat-v020', private: true, type: 'module', dependencies: { 'defuss-dbsonl': baselineTarball } }));
+run(bun, ['install', '--ignore-scripts'], baseline);
+// The same worker drives the 0.2.0 baseline, which ships its native entry as `/node`, not `/server`.
+await writeFile(resolve(baseline, 'v2-worker.js'), (await readFile(resolve(consumer, 'v2-worker.js'), 'utf8')).replace(/(["'])defuss-dbsonl\/server\1/, '$1defuss-dbsonl/node$1'));
+const v2 = JSON.parse(run('node', ['v2.js', bun, resolve(baseline, 'v2-worker.js')], consumer));
+await copyFile('tests/consumers/v2-types.ts', resolve(consumer, 'v2-types.ts'));
+await writeFile(resolve(consumer, 'tsconfig.json'), JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true, types: [], lib: ['ES2022'], noEmit: true, skipLibCheck: false }, files: ['v2-types.ts'] }));
+run('node', [resolve('node_modules/typescript/bin/tsc'), '-p', resolve(consumer, 'tsconfig.json')]);
+
+await copyFile('tests/browser/v2.ts', resolve(consumer, 'browser.ts'));
+const bundle = await build({ entryPoints: [resolve(consumer, 'browser.ts')], bundle: true, format: 'esm', platform: 'browser', target: 'es2022', outfile: resolve(output, 'v2.js'), metafile: true });
+if (Object.keys(bundle.metafile!.inputs).some(path => /defuss-dbsonl\/src\//.test(path))) throw new Error('Browser test accidentally imported workspace source.');
+const server = createServer(async (request, response) => {
+  const path = request.url?.split('?')[0];
+  if (path === '/') { response.setHeader('content-type', 'text/html'); response.end('<!doctype html><title>DBSONL package verification</title>'); return; }
+  if (path !== '/v2.js') { response.writeHead(404); response.end(); return; }
+  response.setHeader('content-type', 'text/javascript'); response.end(await readFile(resolve(output, path.slice(1))));
+});
+// A refused bind must fail the run; without the error listener the listen Promise never settles.
+await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', () => { server.off('error', reject); resolve(); }); });
+let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+try {
+  browser = await chromium.launch({ headless: true,
+    ...(process.env.CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.CHROMIUM_EXECUTABLE_PATH } : {}),
+    ...(process.env.CHROMIUM_ARGS ? { args: JSON.parse(process.env.CHROMIUM_ARGS) as string[] } : {}),
+  });
+  const page = await browser.newPage();
+  await page.goto(`http://127.0.0.1:${(server.address() as { port: number }).port}/`);
+  const result = await page.evaluate(async () => {
+    const namespace = `${Date.now()}`;
+    const call = async (path: string, mode = ''): Promise<Record<string, unknown>> => {
+      const worker = new Worker(path, { type: 'module' });
+      try {
+        return await new Promise((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error('Worker timed out.')), 45000);
+          worker.onmessage = event => { clearTimeout(timer); if (event.data.ok) resolve(event.data); else reject(new Error(event.data.error)); };
+          worker.onerror = event => { clearTimeout(timer); reject(new Error(event.message)); };
+          worker.postMessage({ namespace, mode });
+        });
+      } finally { worker.terminate(); }
+    };
+    await Promise.all([call('/v2.js', 'a'), call('/v2.js', 'b')]);
+    await call('/v2.js', 'verify');
+    await call('/v2.js', 'directory');
+    return { opfs: '30 concurrent worker transactions, snapshot isolation and compaction', restart: 'verified in a different worker', directory: 'transaction on a directory handle' };
+  });
+  const report = { package: `defuss-dbsonl@${version}`, generatedAt: new Date().toISOString(), runtimes, v2, commonjs: ['Node', 'Bun'], declarations: 'no DOM or Node ambient types', browser: { name: 'Chromium', version: browser.version(), ...result } };
+  await writeFile(resolve(output, 'e2e.json'), JSON.stringify(report, null, 2) + '\n');
+  console.log(`Node, Bun, ESM, CommonJS, declaration checks and Chromium ${browser.version()} passed.`);
+} finally { await browser?.close(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }

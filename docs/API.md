@@ -1,0 +1,83 @@
+# API (format 2)
+
+VERIFIED: All methods return promises unless listed as synchronous. Runtime values use DSON, including binary views, dates, bigint, undefined and cyclic references. Generic `T` describes application values; DBSONL does not perform application schema validation.
+
+## Construction
+
+| Export | Contract |
+| --- | --- |
+| `createMemoryBackend(options?)` | New isolated memory namespace; share the returned object between clients |
+| `createFileBackend(root, options?)` from `/server` | Native Storage plus whole-file OS locks and directory fsync, including the root's ancestors at creation |
+| `createBrowserBackend(storage, namespace, locks, writeChunkBytes?)` from `/browser` | Supplied Storage plus Web Locks; fourth argument defaults to 65536 |
+| `openDbsonl<T>(backend, name, options?)` | Read persistent metadata; missing database requires `create: true`, which also completes an interrupted create (empty head and generations) |
+
+Names contain 1 through 64 lowercase letters, digits, hyphens or underscores, beginning with a letter or digit. Keys are strings of at most 4096 UTF-16 code units, including empty strings. Ordering uses JavaScript string comparison, not locale collation. Native and browser namespaces must be application-owned and consistently coordinated.
+
+## Operations
+
+| Method | Result and behavior |
+| --- | --- |
+| `get(key)` | `{found: false}` or `{found: true, value, revision}`; presence is separate from undefined |
+| `put(key, value, options?)` | Single-operation atomic batch |
+| `delete(key, options?)` | Atomic delete; deleting an absent key is valid |
+| `batch(mutations, {ifRevision?, signal?}?)` | One revision for all operations; duplicate keys apply in input order |
+| `transaction(callback, {signal?}?)` | `{result, revision, count}`; callback runs once, revision conflict aborts publication |
+| `beginRead()` | Explicit immutable snapshot with `revision`, `count`, `get`, `scan`, `close` |
+| `stats()` | Current revision, count, generation, committedBytes, cacheBytes, cachePages, durability |
+| `verify()` | Full persisted logical integrity traversal; returns revision and count |
+| `compact({mode?, signal?}?)` | Copy live data and rebuild index; returns revision, beforeBytes, afterBytes |
+| `collect()` | Remove unpinned obsolete generations; returns removed and retained filenames |
+| `close()` | Stop admission, drain work and close owned snapshots; idempotent |
+
+VERIFIED: Nonempty batches advance revision even for a delete of an absent key. Empty batches validate `ifRevision` but do not advance revision. Transactions validate the complete snapshot revision, preventing write skew and range phantoms. This also means disjoint-key writers can conflict. A read-only callback can conflict. There is no automatic callback retry.
+
+A transaction exposes `revision`, async `get`, synchronous `put`/`delete` and an async `scan`. Staging copies each value through the encoder. Replacing a staged key replaces its budget charge. Reads see staged writes. A transaction scan captures the staged overlay at its first pull and merges it with the immutable base in key order; subsequent staging is visible to a new scan. Transaction objects reject use after the callback finishes.
+
+Snapshot and transaction scans accept `{gte?, lt?, limit?, signal?}` and yield one `{key, value, revision}` per pull. `gte` is inclusive, `lt` exclusive. Returned values are owned decoded objects. A paused iterator becomes unusable when its snapshot closes. Use `try/finally` to close snapshots even after errors or early breaks.
+
+VERIFIED: Optimistic compaction is the default. A concurrent publication yields `CONFLICT` and leaves an unpublished candidate for `collect()`. Exclusive compaction holds the commit lock through copying; readers retain their roots and writers queue. Compaction does not change logical revision or record revisions. Collection refreshes the fallback head before deleting files and never removes an active generation pin.
+
+## Options and memory accounting
+
+| Open option | Default | Meaning |
+| --- | --- | --- |
+| `create` | false | Create only when no manifest exists |
+| `maxRecordBytes` | 16777216 | DSON payload budget per application value |
+| `maxTransactionBytes` | 67108864 | Sum of encoded values, two bytes per key code unit and 64 bytes per staged operation |
+| `maxTransactionOperations` | 10000 | Batch operations or distinct staged transaction keys |
+| `maxPendingOperations` | 256 | Admitted top-level operations per database handle |
+| `maxPendingBytes` | 134217728 | Aggregate encoded-write budget per database handle |
+| `maxCacheBytes` | 8388608 | Encoded bytes represented in the page cache |
+| `maxCachePages` | 1024 | Maximum cached decoded index pages |
+| `signal` | absent | Cooperative cancellation while opening |
+
+VERIFIED: There is no RAM map proportional to total live keys and no fixed live-key count limit. Budgets reject excess work rather than retain an unbounded hidden queue. The writer additionally bounds the encoded size of old index pages loaded into its dirty tree by `maxTransactionBytes`; this is a separate budget from staged values. Byte budgets exclude temporary encoder allocation, decoded object overhead, active traversal pages, caller references and memory-adapter storage. Snapshot pins are explicit resources; callers must close them. Zero cache budgets disable index caching. The fixed manifest parse cache is separate. Codec depth 512 and reference-table limit 1000000 remain DSON defaults; index pages use a separate 512 KiB codec limit. File offsets and revisions must fit safe JavaScript integers.
+
+## Failures and retry policy
+
+| Code | Meaning and action |
+| --- | --- |
+| `CONFLICT` | Revision/publication changed; transaction did not publish; retry prepared work as appropriate |
+| `QUEUE_FULL` | Per-handle admission exhausted; await existing work before retrying |
+| `LIMIT_EXCEEDED` | Staging exceeds a configured transaction budget |
+| `ABORTED` | Cancellation observed before publication started |
+| `COMMIT_UNCERTAIN` | Publication or its flush failed; inspect current revision before retrying |
+| `CORRUPT` | Invalid committed bytes, schema, ordering or addresses; preserve files for diagnosis |
+| `UNSUPPORTED` | Unsupported manifest version or unavailable required platform primitive |
+| `CLOSED` | Database, snapshot or completed transaction rejects new work |
+
+VERIFIED: Storage codes such as `QUOTA_EXCEEDED`, `NOT_FOUND`, `PERMISSION_DENIED` and `IO_ERROR` propagate. Invalid arguments and codec limits can throw TypeError or RangeError. Branch on error codes rather than `instanceof`, because ESM and CJS class identities can differ.
+
+An I/O failure before head publication leaves the old head authoritative and may leave an unpublished tail. Publication failure can mean the new head is already visible. There is no application-level deduplication of uncertain retries: use a transaction with an application operation ID when exactly-once effects matter. No API promises recovery after arbitrary corruption of both manifest slots.
+
+## Custom backend contract
+
+VERIFIED: `Backend` contains a Storage adapter, a positive `writeChunkBytes`, a durability label and a coordinator. `acquire` returns an idempotent async release; shared pins coexist, exclusive locks exclude all other owners, and try-only acquisition returns undefined immediately when busy. All participants must agree on lock names and scope. `syncDirectory` must match the advertised durability. `retire` runs only for unreferenced generations under the commit lock. The bundled factories are the supported implementations; custom coordinators must meet this protocol before storing valuable data.
+
+## Native connection capabilities and performance
+
+VERIFIED: `createFileBackend(root, {io: 'async'})` is the default. The `{io: 'sync'}` option uses blocking reads, writes, size queries and flushes; use it in a worker or CLI when throughput matters more than scheduling other tasks on that thread. Lock attempts are always nonblocking and contended OS locks wait asynchronously. A single `get()` holds the commit lock through its read; explicit snapshots retain their independent lifetime and permit writers to proceed.
+
+VERIFIED: Each open database retains at most two idle native read descriptors plus one idle commit descriptor, an 8 KiB manifest parse cache, and its configured page cache. Each active scan/compaction can retain a 64 KiB read-ahead window; each active writer has a buffer of at most 64 KiB. Point reads never retain decoded or encoded values between calls. If the head changes, a native get may temporarily decode both its prior-root candidate and the current-root value; this work is bounded by two record budgets, excluding decoded-object overhead. These fixed buffers and descriptor resources are separate from `stats().cacheBytes`. Close database handles when idle generations should release OS resources immediately; unlinking a file held open by another process does not immediately free its disk blocks.
+
+VERIFIED: Custom backends may optionally expose `connect(name)`, returning `{backend, close}` for a per-database scope. The engine closes that scope on failed open and after draining successful handles. An optional `read(name, offset, length)` performs fresh positional reads of immutable committed prefixes, or the manifest under the commit lock. It must honor read chunk limits, reject invalid names/symlinks/nonregular files and return owned bytes. It fills the requested range unless EOF is encountered; partial OS reads must be retried. It must allow concurrent readers and writers of disjoint, unpublished bytes. Omitting both capabilities retains the portable Storage path. The supplied native implementation provides them; OPFS deliberately keeps its exclusive-handle protocol.
