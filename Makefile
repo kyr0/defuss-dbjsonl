@@ -5,7 +5,7 @@ BUN ?= bun
 export
 VAE := python3 tmp/vae-tooling/plugin/scripts/vae.py
 
-.PHONY: help setup build lint test coverage e2e verify bench bench-scale metrics vae-setup vae prose release start stop restart status log
+.PHONY: help setup build site dev lint test coverage e2e verify bench bench-scale metrics vae-setup vae prose release start stop restart status log
 help: ## List available targets.
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "%-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 setup: ## Install pinned dependencies, Chromium and the VAE runtime.
@@ -15,9 +15,14 @@ setup: ## Install pinned dependencies, Chromium and the VAE runtime.
 	$(BUN) scripts/vae.ts
 build: ## Build ESM, CommonJS and declarations.
 	$(BUN) run build
+site: build ## Bundle the website demos into docs/assets from the built package.
+	$(BUN) scripts/site.ts
+dev: site ## Rebuild the demos and serve the website from docs/ on http://127.0.0.1:3000.
+	$(BUN) x serve@14.2.6 docs --listen tcp://127.0.0.1:3000 --no-clipboard
 lint: ## Typecheck, lint and enforce source-folder architecture documentation.
 	$(BUN) run lint
 	$(BUN) x tsc -p tsconfig.browser.json
+	$(BUN) x tsc -p tsconfig.site.json
 	$(BUN) scripts/check-architecture.ts
 test: ## Test actual memory and native storage, replay and recovery.
 	$(BUN) run test
@@ -26,9 +31,9 @@ coverage: ## Measure production-code coverage with enforced thresholds.
 e2e: build ## Install the tarball and test Node, Bun and a real Chromium worker.
 	$(BUN) scripts/e2e.ts
 verify: lint test coverage e2e ## Execute the complete automated verification suite.
-bench: build ## Compare v0.2/v0.3 across Node/Bun, native async/sync and memory.
+bench: build ## Compare v0.2.0, v0.3.0 and the current build across Node/Bun, native async/sync and memory.
 	$(BUN) scripts/bench.ts
-bench-scale: build ## Compare 10000-record native async workloads with three measured rounds.
+bench-scale: build ## Compare the three builds on 10000-record native async workloads, three measured rounds.
 	$(BUN) scripts/bench.ts --scale
 metrics: ## Print the last benchmark report.
 	@cat output/bench.json

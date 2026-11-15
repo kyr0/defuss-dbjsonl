@@ -1,6 +1,6 @@
 # defuss-dbsonl 0.4.0
 
-Transactional key-value storage for Node.js, Bun and browser workers. Values are DSON, so dates, binary views, bigint, `undefined` and cyclic references survive storage. It is built on `defuss-dson` 1.3.0 and `defuss-storage` 0.3.0 and ships TypeScript declarations with ESM and CommonJS builds.
+Transactional key-value storage for Node.js, Bun and browser workers. Values are DSON, so dates, binary views, bigint, `undefined` and cyclic references survive storage. It is built on [defuss-dson](https://dson.defuss.org) 1.3.0 and [defuss-storage](https://storage.defuss.org) 0.3.0 and ships TypeScript declarations with ESM and CommonJS builds. It is designed as the backing store and API of [defuss-dataview](https://dataview.defuss.org), which adds filters, sorting and paging for table and tree grids. Project website: [docs/index.html](docs/index.html).
 
 VERIFIED: A database is a persistent copy-on-write B+tree with immutable snapshots, atomic batches, optimistic serializable transactions, compaction and process-safe coordination. Opening reads two small manifest slots instead of replaying a log, and readers never block writers.
 
@@ -112,6 +112,7 @@ Version 0.4.0 renamed the native entry from `defuss-dbsonl/node` to `defuss-dbso
 make setup    # pinned Node/Bun via mise, dependencies, Chromium, VAE runtime
 make verify   # lint, tests, coverage, packed-package e2e
 make bench    # matched v0.2 versus current benchmarks
+make dev      # rebuild the website demos and serve docs/ on 127.0.0.1:3000
 make vae      # verification, review and documentation gate
 make release  # tarball, source ZIP and checksums; never publishes or commits
 ```
@@ -120,6 +121,7 @@ VERIFIED: `make verify` runs strict type checks, lint, real-storage tests, cover
 
 | Page | Answers |
 | --- | --- |
+| [docs/index.html](docs/index.html) | The project website, with demos that run the library in the visitor's tab; `make site` rebuilds its bundles |
 | [ARCH.md](ARCH.md) | Why the protocol is built this way: lock order, crashes, reclamation, security |
 | [docs/API.md](docs/API.md) | Every operation, option default, budget and error code |
 | [docs/FORMAT.md](docs/FORMAT.md) | Files on disk, slot layout and publication order |

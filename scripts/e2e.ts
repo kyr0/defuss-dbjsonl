@@ -49,8 +49,17 @@ run('node', [resolve('node_modules/typescript/bin/tsc'), '-p', resolve(consumer,
 await copyFile('tests/browser/v2.ts', resolve(consumer, 'browser.ts'));
 const bundle = await build({ entryPoints: [resolve(consumer, 'browser.ts')], bundle: true, format: 'esm', platform: 'browser', target: 'es2022', outfile: resolve(output, 'v2.js'), metafile: true });
 if (Object.keys(bundle.metafile!.inputs).some(path => /defuss-dbsonl\/src\//.test(path))) throw new Error('Browser test accidentally imported workspace source.');
+// The website demos are bundled against the installed tarball, so the page is tested on the code users receive.
+run(bun, ['scripts/site.ts', resolve(output, 'site/assets'), resolve(consumer, 'node_modules/defuss-dbsonl')]);
+const site: Record<string, [string, string]> = {
+  '/site/': [resolve('docs/index.html'), 'text/html'],
+  '/site/favicon.svg': [resolve('docs/favicon.svg'), 'image/svg+xml'],
+  '/site/assets/demo.js': [resolve(output, 'site/assets/demo.js'), 'text/javascript'],
+  '/site/assets/opfs.worker.js': [resolve(output, 'site/assets/opfs.worker.js'), 'text/javascript'],
+};
 const server = createServer(async (request, response) => {
   const path = request.url?.split('?')[0];
+  if (path && site[path]) { response.setHeader('content-type', site[path][1]); response.end(await readFile(site[path][0])); return; }
   if (path === '/') { response.setHeader('content-type', 'text/html'); response.end('<!doctype html><title>DBSONL package verification</title>'); return; }
   if (path !== '/v2.js') { response.writeHead(404); response.end(); return; }
   response.setHeader('content-type', 'text/javascript'); response.end(await readFile(resolve(output, path.slice(1))));
@@ -83,6 +92,41 @@ try {
     await call('/v2.js', 'directory');
     return { opfs: '30 concurrent worker transactions, snapshot isolation and compaction', restart: 'verified in a different worker', directory: 'transaction on a directory handle' };
   });
+  // Every interactive element of the website runs once against the packed build.
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto(`http://127.0.0.1:${(server.address() as { port: number }).port}/site/`);
+  await page.waitForSelector('html[data-demo-ready]', { timeout: 30000 });
+  await page.waitForSelector('html[data-persist-ready]', { timeout: 30000 });
+  await page.click('#snap-transfer');
+  await page.waitForFunction(() => document.querySelector('#snap-live-alice')?.textContent === '80');
+  if (await page.textContent('#snap-pin-alice') !== '100') throw new Error('Website snapshot changed after a transfer.');
+  await page.click('#snap-refresh');
+  await page.waitForFunction(() => document.querySelector('#snap-pin-alice')?.textContent === '80');
+  await page.click('#conflict-run');
+  await page.waitForFunction(() => document.querySelector('#conflict-log')?.textContent?.includes('CONFLICT'));
+  await page.click('#conflict-retry');
+  await page.waitForFunction(() => document.querySelector('#conflict-value')?.textContent === '11');
+  await page.click('#types-run');
+  await page.waitForFunction(() => document.querySelectorAll('#types-out tr[data-ok="true"]').length === 5);
+  const before = Number(await page.textContent('#persist-count'));
+  await page.click('#persist-inc');
+  await page.waitForFunction(count => document.querySelector('#persist-count')?.textContent === String(count), before + 1);
+  await page.reload();
+  await page.waitForSelector('html[data-persist-ready]', { timeout: 30000 });
+  if (Number(await page.textContent('#persist-count')) !== before + 1) throw new Error('Website counter did not survive a reload.');
+  await page.click('#persist-reset');
+  await page.waitForFunction(() => document.querySelector('#persist-count')?.textContent === '0');
+  // The shader runtime comes from a pinned, integrity-checked CDN file; three effects must have mounted their canvas.
+  await page.waitForFunction(() => document.querySelectorAll('.shader canvas').length === 3, undefined, { timeout: 30000 });
+  await page.click('#tab-browser');
+  if (await page.isHidden('#use-browser')) throw new Error('Website install tabs did not switch.');
+  if (errors.length) throw new Error(`Website errors: ${errors.join('; ')}`);
+  // The committed bundles must equal a fresh build from the packed package, or `make site` was skipped after a change.
+  for (const file of ['demo.js', 'opfs.worker.js']) {
+    if (!(await readFile(resolve(output, 'site/assets', file))).equals(await readFile(resolve('docs/assets', file)))) throw new Error(`docs/assets/${file} is stale; run make site.`);
+  }
+  Object.assign(result, { website: 'snapshot, conflict, DSON and OPFS demos; reload persistence; install tabs' });
   const report = { package: `defuss-dbsonl@${version}`, generatedAt: new Date().toISOString(), runtimes, v2, commonjs: ['Node', 'Bun'], declarations: 'no DOM or Node ambient types', browser: { name: 'Chromium', version: browser.version(), ...result } };
   await writeFile(resolve(output, 'e2e.json'), JSON.stringify(report, null, 2) + '\n');
   console.log(`Node, Bun, ESM, CommonJS, declaration checks and Chromium ${browser.version()} passed.`);

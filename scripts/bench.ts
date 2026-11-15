@@ -1,4 +1,4 @@
-/** VERIFIED: Compare published v0.2 and current builds using identical, asserted workloads. */
+/** VERIFIED: Compare the vendored v0.2.0 and v0.3.0 builds with the current build using identical, asserted workloads. */
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -15,17 +15,26 @@ function run(command: string, args: string[], cwd = process.cwd()): string {
   return result.stdout.trim();
 }
 await mkdir('output', { recursive: true });
-const baseline = resolve('tmp/bench-v020'); await mkdir(baseline, { recursive: true });
-const tarball = resolve('vendor/defuss-dbsonl-0.2.0.tgz');
-if (createHash('sha256').update(await readFile(tarball)).digest('hex') !== '90eaf0e5e6c78cc636f6fb9273cc0475a1e2220180ecd569f97bac7ad0a3fe1b') throw new Error('Benchmark baseline checksum mismatch.');
-await writeFile(resolve(baseline, 'package.json'), JSON.stringify({ name: 'dbsonl-bench-v020', private: true, type: 'module', dependencies: { 'defuss-dbsonl': tarball } }));
-run(bun, ['install', '--ignore-scripts'], baseline);
+// Both earlier builds are vendored and checksum-pinned, so every run measures the same bytes.
+const baselines = [
+  { label: 'v020', tarball: 'vendor/defuss-dbsonl-0.2.0.tgz', sha256: '90eaf0e5e6c78cc636f6fb9273cc0475a1e2220180ecd569f97bac7ad0a3fe1b' },
+  { label: 'v030', tarball: 'vendor/defuss-dbsonl-0.3.0.tgz', sha256: '264209b1774450d4b267483539d1d48dda9d4d808f09d94c7ac4412e57bbbc50' },
+];
+const packages: Record<string, string> = { current: process.cwd() };
+for (const { label, tarball, sha256 } of baselines) {
+  if (createHash('sha256').update(await readFile(tarball)).digest('hex') !== sha256) throw new Error(`Benchmark baseline checksum mismatch: ${tarball}.`);
+  const directory = resolve(`tmp/bench-${label}`); await mkdir(directory, { recursive: true });
+  await writeFile(resolve(directory, 'package.json'), JSON.stringify({ name: `dbsonl-bench-${label}`, private: true, type: 'module', dependencies: { 'defuss-dbsonl': resolve(tarball) } }));
+  run(bun, ['install', '--ignore-scripts'], directory);
+  packages[label] = resolve(directory, 'node_modules/defuss-dbsonl');
+}
 const results: unknown[] = [];
 for (const runtime of ['node', bun]) {
   for (const io of scale ? ['async'] : ['async', 'sync', 'memory']) {
-    const versions = runtime === 'node' ? ['baseline', 'current'] : ['current', 'baseline'];
+    // Version order reverses between runtimes, so warm caches and thermal drift do not always favor the same build.
+    const versions = runtime === 'node' ? ['v020', 'v030', 'current'] : ['current', 'v030', 'v020'];
     for (const version of versions) {
-      const directory = version === 'baseline' ? resolve(baseline, 'node_modules/defuss-dbsonl') : process.cwd();
+      const directory = packages[version]!;
       const output = `output/${scale ? 'scale-' : ''}perf-${runtime === 'node' ? 'node' : 'bun'}-${io}-${version}.json`;
       run(runtime, ['scripts/compare-worker.ts', directory, output, io, String(rounds), String(records)]);
       const result = JSON.parse(await readFile(output, 'utf8')); results.push(result);

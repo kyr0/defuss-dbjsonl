@@ -1,8 +1,45 @@
 # Performance evidence
 
-VERIFIED: Every table compares the shipped v0.2.0 package with a later build under the same format, transactional API, durability barriers, values and assertions. The Linux tables and the macOS run measured 0.3.0 builds; the "v0.3" columns name that build. Version 0.4.0 removed the legacy entries and reads the writer's index pages with one known-length read instead of a header read plus a payload read. The measured read paths are the same code.
+VERIFIED: Every table compares builds under the same format, transactional API, durability barriers, values and assertions. The macOS arm64 tables measure v0.2.0, v0.3.0 and v0.4.0 in the same runs. The Linux x64 tables come from an earlier run that measured v0.2.0 and a 0.3.0 build only; no Linux host was available for 0.4.0. The vendored 0.3.0 tarball is the build those Linux tables measured: its `dist` hashes match the recorded artifacts.
 
-## Default native asynchronous I/O
+## macOS arm64: v0.2, v0.3 and v0.4
+
+VERIFIED: Three consecutive runs of `make bench` under the pinned toolchain (`mise exec`) on an Apple M5 Max (18 logical CPUs), macOS 25.6.0, APFS, Node 24.22.1 and Bun 1.4.3, on 2026-11-15. The machine was busy, with a load average between 4.6 and 8.3. Each run takes the median of seven rounds after two warmups; the tables show the median of the three runs. Times are milliseconds per 1000 operations or rows; batch, compaction and reopen are per workload. All three raw reports are in `validation/bench-macos-arm64.json`.
+
+| Runtime | Workload | v0.2 ms | v0.3 ms | v0.4 ms | v0.4 vs v0.2 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Node | Fresh-root get | 445.39 | 30.07 | 31.14 | 14.31x |
+| Node | Pinned snapshot get | 132.79 | 13.53 | 12.98 | 10.23x |
+| Node | Snapshot scan | 129.26 | 4.99 | 5.55 | 23.29x |
+| Node | Atomic batch | 31.60 | 19.53 | 18.68 | 1.69x |
+| Node | Compaction | 177.95 | 24.76 | 24.65 | 7.22x |
+| Node | Indexed reopen | 0.48 | 0.47 | 0.52 | 0.93x |
+| Bun | Fresh-root get | 514.84 | 39.91 | 41.10 | 12.53x |
+| Bun | Pinned snapshot get | 155.19 | 15.89 | 17.35 | 8.94x |
+| Bun | Snapshot scan | 155.67 | 7.58 | 9.37 | 16.62x |
+| Bun | Atomic batch | 26.97 | 14.05 | 12.84 | 2.10x |
+| Bun | Compaction | 180.52 | 18.97 | 19.37 | 9.32x |
+| Bun | Indexed reopen | 0.38 | 0.34 | 0.31 | 1.24x |
+
+| Runtime | Mode | v0.2 get ms | v0.3 get ms | v0.4 get ms |
+| --- | --- | ---: | ---: | ---: |
+| Node | sync | 398.20 | 13.08 | 13.85 |
+| Node | memory | 21.66 | 12.09 | 11.21 |
+| Bun | sync | 436.05 | 24.07 | 28.45 |
+| Bun | memory | 27.86 | 21.15 | 23.50 |
+
+VERIFIED: On Node, v0.3 and v0.4 trade places from run to run with no consistent direction. On Bun, v0.4 was slower than v0.3 in all three runs for snapshot reads and scans on memory storage (20% to 26%), scans on native synchronous I/O (14% to 34%) and scans on native asynchronous I/O (12% to 28%). Both builds issue the same Storage reads.
+
+UNKNOWN: Why Bun runs these 0.4.0 read paths slower. Decoding moved into a shared `decodeRef` helper and the bundle layout changed when the legacy entries were removed; a Bun CPU profile of the memory snapshot-scan workload on both builds would locate the difference.
+
+VERIFIED: The 10000-record check is one run of `make bench-scale` in the same session, native asynchronous I/O, two warmups and three measured rounds, in milliseconds per 10000 lookups. Raw measurements are in `validation/bench-scale-macos-arm64.json`.
+
+| Runtime | v0.2 get ms | v0.3 get ms | v0.4 get ms | v0.4 vs v0.2 |
+| --- | ---: | ---: | ---: | ---: |
+| Node | 4510.49 | 308.34 | 335.31 | 13.45x |
+| Bun | 5377.49 | 465.28 | 357.13 | 15.06x |
+
+## Linux x64: v0.2 and v0.3
 
 VERIFIED: Times below are medians of seven measured rounds after two complete warmup rounds, in milliseconds per 1000 operations or rows. Batch means one atomic commit of 1000 mutations, including flushes. Reopen is one indexed open, not 1000 opens. Raw samples, measured build SHA-256 hashes, exact runtime versions and host metadata are in `validation/bench.json` in the source ZIP.
 
@@ -21,7 +58,7 @@ VERIFIED: Times below are medians of seven measured rounds after two complete wa
 | Bun | Compaction | 405.82 | 45.94 | 8.83x |
 | Bun | Indexed reopen | 0.81 | 0.78 | 1.04x |
 
-## Worker/CLI synchronous I/O and memory
+### Worker/CLI synchronous I/O and memory
 
 VERIFIED: Synchronous I/O is opt-in through the `createFileBackend(root, {io: "sync"})` option. It blocks its calling thread, including during fsync. Use a worker or CLI when choosing this mode. The asynchronous mode above remains the default. Memory results show the portable path separately.
 
@@ -33,6 +70,15 @@ VERIFIED: Synchronous I/O is opt-in through the `createFileBackend(root, {io: "s
 | Bun | memory | 82.25 | 56.39 |
 
 VERIFIED: Not every microbenchmark necessarily improves. The raw report includes memory snapshots, scans, batches and reopen costs as well as the native gains. Small sub-millisecond reopen differences and memory-path variation are not hidden by averaging them into a single score.
+
+### 10000-record scaling check
+
+VERIFIED: Native asynchronous I/O, two complete warmups and three measured rounds. Times are milliseconds per 10000 lookups. Raw measurements and the remaining workloads are in `validation/bench-scale.json`.
+
+| Runtime | v0.2 get ms | v0.3 get ms | Speedup |
+| --- | ---: | ---: | ---: |
+| Node | 10170.90 | 609.91 | 16.68x |
+| Bun | 10569.36 | 930.02 | 11.36x |
 
 ## Why the read path changed
 
@@ -67,27 +113,6 @@ VERIFIED: `scripts/microbench.ts` checks equal, unequal, empty, short and unalig
 
 VERIFIED: The shared implementation uses the word loop with a byte fallback for unaligned buffers or lengths. Four-way unrolling did not consistently beat it across both engines and runs. The results support this specific choice, not a claim that all JITs or workloads are optimally compiled.
 
-## macOS arm64 run
-
-VERIFIED: One run of `make bench` on an Apple M5 Max (18 logical CPUs) under macOS 25.6.0, on APFS, with Node 24.22.1 and Bun 1.4.3. It used the same protocol and bundled v0.2 tarball as the Linux tables above. The machine was not idle: the load average was about 5. Raw samples are in `validation/bench-macos-arm64.json`.
-
-| Runtime | Workload | v0.2 ms | v0.3 ms | Speedup |
-| --- | --- | ---: | ---: | ---: |
-| Node | Fresh-root get | 670.84 | 36.53 | 18.37x |
-| Node | Pinned snapshot get | 216.89 | 15.97 | 13.58x |
-| Node | Snapshot scan | 187.84 | 5.65 | 33.27x |
-| Node | Atomic batch | 35.54 | 21.41 | 1.66x |
-| Node | Compaction | 264.08 | 25.56 | 10.33x |
-| Node | Indexed reopen | 0.79 | 0.68 | 1.18x |
-| Bun | Fresh-root get | 595.69 | 34.35 | 17.34x |
-| Bun | Pinned snapshot get | 187.97 | 19.07 | 9.86x |
-| Bun | Snapshot scan | 180.02 | 8.67 | 20.77x |
-| Bun | Atomic batch | 30.29 | 14.68 | 2.06x |
-| Bun | Compaction | 219.94 | 18.20 | 12.08x |
-| Bun | Indexed reopen | 0.53 | 0.36 | 1.48x |
-
-VERIFIED: The ratios against v0.2 are close to the Linux ones, so the read-path gains do not depend on one platform. Absolute times differ from Linux because the hardware differs; this is not a platform ranking. In synchronous mode, v0.3 get takes 14.30 ms on Node and 26.75 ms on Bun. For the memory backend, the v0.3 speedups are 1.1x to 1.9x. Indexed reopen in memory stays within 0.01 ms in both runtimes, which is noise at this resolution.
-
 ## Reproduction and scope
 
 ```sh
@@ -97,19 +122,10 @@ make bench        # 1000 records, both runtimes, async/sync/memory, 7 rounds
 make bench-scale  # 10000 records, both runtimes, native async, 3 rounds
 ```
 
-VERIFIED: The checksum-pinned v0.2 tarball is bundled under `vendor/`. Each benchmark child imports one built package, uses a new temporary database, checks every returned value and scan count, verifies the database, and closes it. Version order is reversed between runtimes. Reopen follows close; the OS filesystem cache is warm. The benchmark does not silently select a subset of rounds.
+VERIFIED: The checksum-pinned v0.2.0 and v0.3.0 tarballs are bundled under `vendor/`. Each benchmark child imports one built package, uses a new temporary database, checks every returned value and scan count, verifies the database, and closes it. Version order is reversed between runtimes. Reopen follows close; the OS filesystem cache is warm. The benchmark does not silently select a subset of rounds.
 
-VERIFIED: The recorded environment is Linux x64 on a shared AMD EPYC host with an overlay filesystem, Node 24.22.1 and Bun 1.4.3. These results do not establish cold-device latency, sustained mixed-workload p99, Windows performance, or a universal optimum; the macOS run above is a single run. CPU contention and runtime tiering cause run-to-run variation.
+VERIFIED: The Linux environment is a shared AMD EPYC host with an overlay filesystem, Node 24.22.1 and Bun 1.4.3. Neither host establishes cold-device latency, sustained mixed-workload p99, Windows performance, or a universal optimum. CPU contention and runtime tiering cause run-to-run variation.
 
 VERIFIED: Native handle caching retains at most two idle read descriptors and one idle commit descriptor per open database handle. GC unlinks obsolete files; another process retaining an idle descriptor can delay physical disk-space release until eviction or close. Explicit snapshots deliberately retain their generations. Applications should close idle handles, and must not replace live file inodes outside the DBSONL protocol.
 
-VERIFIED: Correctness tests use real storage, file permissions, truncated/corrupt images, actual kernel locks, process termination and browser workers. Mixed v0.2/v0.3 Node/Bun writers exercise format and lock interoperability. These checks cover process failure; they do not certify power-loss behavior.
-
-## 10000-record scaling check
-
-VERIFIED: Native asynchronous I/O, two complete warmups and three measured rounds. Times are milliseconds per 10000 lookups. Raw measurements and the remaining workloads are in `validation/bench-scale.json`.
-
-| Runtime | v0.2 get ms | v0.3 get ms | Speedup |
-| --- | ---: | ---: | ---: |
-| Node | 10170.90 | 609.91 | 16.68x |
-| Bun | 10569.36 | 930.02 | 11.36x |
+VERIFIED: Correctness tests use real storage, file permissions, truncated/corrupt images, actual kernel locks, process termination and browser workers. Mixed v0.2.0 and current Node/Bun writers exercise format and lock interoperability. These checks cover process failure; they do not certify power-loss behavior.

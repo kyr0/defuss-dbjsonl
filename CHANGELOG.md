@@ -9,6 +9,10 @@ Breaking changes:
 
 VERIFIED: Format 2 and the lock protocol are unchanged; the packed-package suite runs 0.2.0 and 0.4.0 writers concurrently against one database. `openDbsonl(..., { create: true })` completes an interrupted create: an empty head file whose generation files are all empty. Any persisted byte still fails closed with `CORRUPT`. Writer index-page loads use one known-length read. Browser tests cover directory-handle Storage through the format-2 API.
 
+VERIFIED: Added a project website in `docs/index.html` whose demos run the library in the visitor's tab: a snapshot during transfers, a transaction conflict, a DSON round trip and an OPFS counter that survives reloads. `make e2e` drives every demo against the installed tarball. The npm package ships only the Markdown pages from `docs/`.
+
+VERIFIED: `make bench` measures the vendored v0.2.0 and v0.3.0 builds beside the current build in one session. In three macOS arm64 runs, Bun ran some 0.4.0 read workloads slower than 0.3.0: snapshot reads and scans on memory storage by 20% to 26%, and scans on native storage by 12% to 34%. Node showed no consistent difference. `docs/PERFORMANCE.md` has the tables.
+
 ## 0.3.0
 
 VERIFIED: Preserved format 2, all public operations, portable backends and legacy exports. Added per-database native descriptor ownership, local FIFO commit admission, nonblocking native lock attempts, concurrent positional reads and pipelined fresh-head/value reads. Metadata parsing is cached only while freshly read bytes match. Point values remain uncached and detached.

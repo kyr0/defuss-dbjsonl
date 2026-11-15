@@ -1,0 +1,843 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>defuss-dbsonl: transactional storage for JavaScript values</title>
+  <meta name="description" content="A key-value store for Node.js, Bun and browser workers. Atomic batches, serializable transactions and snapshots over a copy-on-write B+tree; dates, typed arrays, bigint and cyclic references are stored as they are. MIT licensed.">
+  <meta property="og:title" content="defuss-dbsonl: transactional storage for JavaScript values">
+  <meta property="og:description" content="Atomic batches, serializable transactions and snapshots for Node.js, Bun and browser workers. The demos on this page run the library in your tab.">
+  <meta property="og:type" content="website">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#fbfaff">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f0d18">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <script>
+    // Before first paint: the saved theme, else the system preference, so the page never flashes the wrong one.
+    (() => {
+      let saved = null;
+      try { saved = localStorage.getItem('db-theme'); } catch {}
+      const dark = saved ? saved === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+      document.documentElement.classList.toggle('dark', dark);
+      document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+    })();
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <!-- Google Fonts serves browser-specific CSS, so it cannot carry an integrity hash; the pinned CDN files below do. -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=JetBrains+Mono:wght@400;600&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/kyr0/defuss-shadcn@v0.9.14/dist/theme/utils/default-semantic-tokens.css" integrity="sha384-FS4yDVVZ509c8YKOag4e40fTdwM0HU2xwCKl71yNXzYTCOUErbXCP+ZFeb94/u6C" crossorigin="anonymous">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/kyr0/defuss-shadcn@v0.9.14/dist/theme/utils/layout.css" integrity="sha384-Mya+ag9dF9uZQEZk/3Dn09rnlOoXLyAh+okDwWz4dA9lhRTfAXcQZGqA8p3kvjWa" crossorigin="anonymous">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/kyr0/defuss-shadcn@v0.9.14/dist/theme/utils/sizing.css" integrity="sha384-Oowm0Qtn1y2I3wYEilhao1YS39fW7dUPVIKw1fwUNEhTPfB67YOoWYtJOpbHimgk" crossorigin="anonymous">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/kyr0/defuss-shadcn@v0.9.14/dist/theme/utils/accessibility.css" integrity="sha384-it6tGYVMvpYs57padZ8J0NNE2O31xT3m7hHfGetbqO3nGWLYd+NP9EoMNyhz2B+E" crossorigin="anonymous">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/kyr0/defuss-shadcn@v0.9.14/dist/theme/utils/shapes.css" integrity="sha384-aZOejDS3Wl7RTrk7xhF91OV7MwlLT5+HBFqsCgc1NJAObqjt5bamU3NxzVEdhZew" crossorigin="anonymous">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/kyr0/defuss-shadcn@v0.9.14/dist/components/all.css" integrity="sha384-SgjVRl6cf624AAuPwGA1D/f05+vCEQTAzdQG8yjkG4CqQvf0xaiMiPOTGB1/beS6" crossorigin="anonymous">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/kyr0/defuss-shadcn@v0.9.14/dist/components/shader/shader.css" integrity="sha384-BJpxMob/uR3kaqyYmsSFTf9FBuOTMZk8z5rDn9v18xVgGbVt/Qn+k+SvxiJWS9C0" crossorigin="anonymous">
+  <style>
+    /* Ink and ember: a violet primary for actions and the current build, amber for the baseline and highlights.
+       Chart pairs passed the palette validator against both surfaces. */
+    :root {
+      --background: oklch(0.99 0.005 290);
+      --foreground: oklch(0.2 0.03 285);
+      --card: oklch(1 0 0);
+      --muted: oklch(0.96 0.01 290);
+      --muted-foreground: oklch(0.48 0.03 285);
+      --border: oklch(0.9 0.015 290);
+      --primary: oklch(0.47 0.22 285);
+      --primary-foreground: oklch(0.99 0 0);
+      --ring: oklch(0.6 0.18 285);
+      --radius: 0.85rem;
+      --font-sans: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+      --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      --db-violet: #6d3fe0;
+      --db-amber: #b86e0c;
+      --db-violet-soft: color-mix(in oklch, var(--db-violet) 12%, transparent);
+      --db-amber-soft: color-mix(in oklch, var(--db-amber) 14%, transparent);
+      --db-ok: oklch(0.5 0.13 155);
+      --db-fail: oklch(0.55 0.2 27);
+    }
+    .dark {
+      --background: oklch(0.15 0.02 285);
+      --foreground: oklch(0.95 0.01 290);
+      --card: oklch(0.19 0.025 285);
+      --muted: oklch(0.23 0.025 285);
+      --muted-foreground: oklch(0.72 0.03 290);
+      --border: oklch(0.3 0.03 285);
+      --primary: oklch(0.72 0.15 288);
+      --primary-foreground: oklch(0.16 0.03 285);
+      --ring: oklch(0.72 0.15 288);
+      --db-violet: #8f6cf5;
+      --db-amber: #b97a1c;
+      --db-ok: oklch(0.75 0.13 155);
+      --db-fail: oklch(0.72 0.16 27);
+    }
+    /* defuss-shadcn sizes its components for border-box; the page supplies that reset. */
+    *, ::before, ::after { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+    body { margin: 0; background: var(--background); color: var(--foreground); font-family: var(--font-sans); }
+    code, kbd, pre { font-family: var(--font-mono); }
+    .db-main { display: flex; flex-direction: column; gap: clamp(4.5rem, 10vw, 7.5rem); padding-block-end: 4rem; }
+    .db-section { width: 100%; max-width: 76rem; margin-inline: auto; padding-inline: 1rem; box-sizing: border-box; scroll-margin-top: 6rem; }
+    .db-display { letter-spacing: -0.03em; font-weight: 700; }
+    .db-h2 { margin: 0; font-size: clamp(1.75rem, 3.6vw, 2.5rem); line-height: 1.12; }
+    .db-lead { color: var(--muted-foreground); font-size: 1.0625rem; max-width: 46rem; text-wrap: pretty; }
+    .db-brand-mark { width: 1.5rem; height: 1.5rem; color: var(--primary); }
+
+    /* Hero: a masked grid, two blurred blobs and the code window over a voronoi shader. */
+    .db-hero { position: relative; isolation: isolate; overflow: clip; padding-block: clamp(6.5rem, 12vw, 9rem) 1rem; }
+    .db-hero-grid { position: absolute; inset: 0; z-index: -2; --shape-ink: color-mix(in oklch, var(--foreground) 7%, transparent); --shape-pattern: 30px;
+      mask-image: radial-gradient(60% 70% at 35% 35%, #000, #0000 78%); -webkit-mask-image: radial-gradient(60% 70% at 35% 35%, #000, #0000 78%); }
+    .db-blob { position: absolute; z-index: -1; aspect-ratio: 1; filter: blur(70px); opacity: 0.45; }
+    .db-blob-a { background: var(--db-violet); width: min(26rem, 50%); inset-block-start: 4%; inset-inline-start: -4%; }
+    .db-blob-b { background: var(--db-amber); width: min(18rem, 38%); inset-block-start: 30%; inset-inline-end: 2%; opacity: 0.3; }
+    .db-hero .mk-hero { max-width: 76rem; margin-inline: auto; padding-inline: 1rem; }
+    .mk-hero-title { font-size: clamp(2.4rem, 6vw, 4.2rem); line-height: 1.02; }
+    .mk-hero-title em { font-style: normal; color: var(--primary); }
+    .db-link { color: var(--primary); font-weight: 600; text-underline-offset: 3px; }
+    .db-dson .text-rotate { vertical-align: bottom; }
+    .db-dson { font-size: clamp(1.2rem, 2vw, 1.45rem); font-weight: 500; line-height: 1.4; margin: 0.25rem 0 0.5rem; }
+    .db-rotate { color: var(--db-amber); font-weight: 600; }
+    .db-footnote { font-size: 0.85rem; color: var(--muted-foreground); max-width: 34rem; }
+    .db-hero .mk-hero-media, .db-hero .mk-hero-copy { min-width: 0; }
+    .db-hero .mk-hero-media { aspect-ratio: auto; height: auto; overflow: visible; }
+    .db-window { max-width: 100%; margin: 0; box-sizing: border-box; position: relative; isolation: isolate; padding: clamp(0.9rem, 2.4vw, 1.6rem); border-radius: calc(var(--radius) * 2); overflow: hidden; }
+    .db-window .mockup-code { overflow-x: auto; max-width: 100%; box-shadow: 0 24px 60px -24px rgb(20 10 50 / 0.55); }
+    .db-window figcaption { margin-top: 0.75rem; color: #fff; font-size: 0.8rem; opacity: 0.9; }
+    .mockup-code .c { color: var(--muted-foreground); }
+    .mockup-code .k { color: var(--db-violet); }
+    .mockup-code .s { color: var(--db-amber); }
+
+    /* Feature cards: What you get, building blocks, tests and guarantees share one layout with large icons. */
+    .db-features { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr)); gap: 1.25rem; margin-top: 2rem; }
+    .db-feature { display: flex; flex-direction: column; gap: 0.55rem; padding: 1.5rem; background: var(--card); border: 1px solid var(--border);
+      border-radius: calc(var(--radius) * 1.4); transition: border-color 0.2s, translate 0.2s; }
+    .db-feature:hover { border-color: color-mix(in oklch, var(--db-violet) 45%, var(--border)); translate: 0 -2px; }
+    @media (prefers-reduced-motion: reduce) { .db-feature { transition: none; } .db-feature:hover { translate: none; } }
+    .db-feature h3 { margin: 0.45rem 0 0; font-size: 1.2rem; }
+    .db-feature p { margin: 0; color: var(--muted-foreground); font-size: 1.02rem; line-height: 1.55; text-wrap: pretty; }
+    .db-icon { width: 4rem; height: 4rem; display: grid; place-items: center; flex: none; background: var(--db-violet-soft); color: var(--primary);
+      box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--db-violet) 35%, transparent); }
+    .db-icon svg { width: 2.1rem; height: 2.1rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .db-features > :nth-child(even) .db-icon { background: var(--db-amber-soft); color: var(--db-amber); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--db-amber) 35%, transparent); }
+    .db-guarantees { list-style: none; padding: 0; margin: 2rem 0 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); gap: 1.25rem; }
+    .db-guarantees > :nth-child(even) .db-icon { background: var(--db-amber-soft); color: var(--db-amber); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--db-amber) 35%, transparent); }
+    .db-guarantees p { color: var(--foreground); }
+    .db-file { align-self: flex-start; margin-top: auto; padding: 0.2rem 0.55rem; border-radius: 6px; background: var(--muted); font-size: 0.82rem; color: var(--muted-foreground); }
+
+    .db-rings { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 9.5rem), 1fr)); gap: 0.9rem; margin-top: 1.75rem; }
+    .db-ring { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 0.75rem; padding: 1.25rem 1rem; background: var(--card); border: 1px solid var(--border); border-radius: 1.1rem 1.1rem 1.1rem 0.35rem; }
+    .db-ring .radial-progress { --size: 6rem; --thickness: 0.6rem; --progress-color: var(--db-violet); color: var(--db-violet); flex: none; font-size: 1.45rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .db-ring .radial-progress { -webkit-text-fill-color: var(--foreground); }
+    .db-ring:nth-child(even) .radial-progress { --progress-color: var(--db-amber); color: var(--db-amber); }
+    .db-ring span { color: var(--muted-foreground); font-size: 0.95rem; line-height: 1.4; }
+    /* Stack: dataview on top, this package, its two dependencies, the media. */
+    .db-stack { margin: 2rem 0 0; display: flex; flex-direction: column; gap: 1.6rem; max-width: 52rem; }
+    .db-layer { position: relative; display: flex; align-items: center; gap: 1rem; padding: 1rem 1.25rem; background: var(--card); border: 1px solid var(--border); border-radius: calc(var(--radius) * 1.4); }
+    .db-layer .db-icon { width: 3.25rem; height: 3.25rem; }
+    .db-layer .db-icon svg { width: 1.7rem; height: 1.7rem; }
+    .db-layer strong { display: flex; align-items: center; gap: 0.5rem; font-size: 1.15rem; }
+    .db-layer span:not(.badge):not(.db-icon) { display: block; color: var(--muted-foreground); }
+    .db-layer[data-kind="self"] { border-color: var(--db-violet); box-shadow: 0 0 0 4px var(--db-violet-soft); }
+    .db-layer[data-kind="app"] .db-icon { background: var(--db-amber-soft); color: var(--db-amber); }
+    .db-layer-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; position: relative; }
+    .db-stack > :not(:first-child)::before, .db-layer-row > .db-layer::before { content: ""; position: absolute; inset-inline-start: 2.85rem; top: -1.6rem; width: 2px; height: 1.6rem; background: color-mix(in oklch, var(--db-violet) 55%, transparent); }
+    .db-layer-row::before { display: none; }
+    .db-media { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.6rem; position: relative; }
+    .db-media::before { inset-inline-start: calc(50% + 0.5rem + 2.85rem) !important; }
+    @media (max-width: 40rem) { .db-media::before { inset-inline-start: 2.85rem !important; } }
+    .db-media li { padding: 0.45rem 0.9rem; border-radius: 999px; border: 1px dashed var(--border); background: var(--muted); font-size: 0.95rem; }
+    @media (max-width: 40rem) { .db-layer-row { grid-template-columns: 1fr; gap: 1.6rem; } }
+
+    /* Demos */
+    .db-demos { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr)); gap: 1.5rem; margin-top: 2rem; }
+    .db-demo { position: relative; display: flex; flex-direction: column; }
+    .db-demo .card-content { display: flex; flex-direction: column; gap: 1rem; flex: 1; }
+    .db-demo p { margin: 0; color: var(--muted-foreground); text-wrap: pretty; }
+    .db-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: auto; }
+    .db-ledger { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+    .db-ledger section { border: 1px solid var(--border); border-radius: var(--radius); padding: 0.75rem 0.9rem; background: var(--muted); }
+    .db-ledger h4 { margin: 0 0 0.4rem; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted-foreground); }
+    .db-ledger dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 0.2rem 0.75rem; font-family: var(--font-mono); font-size: 0.95rem; }
+    .db-ledger dt { color: var(--muted-foreground); }
+    .db-ledger dd { margin: 0; text-align: end; font-weight: 600; }
+    .db-ledger section[data-kind="pin"] { background: var(--db-amber-soft); }
+    .db-log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; min-height: 7.5rem; font-size: 0.9rem; }
+    .db-log li { padding: 0.35rem 0.6rem; border-radius: calc(var(--radius) * 0.6); background: var(--muted); border-inline-start: 3px solid var(--border); }
+    .db-log li[data-tone="ok"] { border-color: var(--db-ok); }
+    .db-log li[data-tone="fail"] { border-color: var(--db-fail); }
+    .db-big { font-family: var(--font-mono); font-size: 2.75rem; font-weight: 600; line-height: 1; }
+    .db-big small { font-size: 0.85rem; color: var(--muted-foreground); font-weight: 400; margin-inline-start: 0.5rem; }
+    .db-types td:last-child { font-weight: 600; }
+    .db-types tr[data-ok="true"] td:last-child { color: var(--db-ok); }
+    .db-types tr[data-ok="false"] td:last-child { color: var(--db-fail); }
+    .db-note { font-size: 0.85rem; min-height: 1.2em; }
+
+
+    /* Section labels render as badges. */
+    .mk-section-header-eyebrow { display: inline-flex; align-items: center; margin-bottom: 0.85rem; padding: 0.35rem 0.85rem; border-radius: 999px; font-size: 0.92rem; font-weight: 600; letter-spacing: 0.01em; text-transform: none;
+      color: var(--primary); background: var(--db-violet-soft); border: 1px solid color-mix(in oklch, var(--db-violet) 30%, transparent); }
+
+    /* How it works: four steps in a row, a vertical list on phones. */
+    .db-flow { margin: 2rem 0 0; }
+    .db-flow-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 2.25rem; }
+    .db-flow-steps li { position: relative; display: flex; flex-direction: column; align-items: center; gap: 0.2rem; padding: 1.1rem 0.75rem; text-align: center;
+      background: var(--card); border: 1px solid var(--border); border-radius: calc(var(--radius) * 1.4); }
+    .db-flow-steps li:not(:last-child)::after { content: ""; position: absolute; inset-inline-start: calc(100% + 0.55rem); top: 50%; width: 1.15rem; height: 2px; background: var(--db-violet); }
+    .db-flow-steps li:not(:last-child)::before { content: ""; position: absolute; inset-inline-start: calc(100% + 1.45rem); top: calc(50% - 4px); border: 5px solid transparent; border-inline-start: 7px solid var(--db-violet); }
+    .db-flow-steps li[data-kind="publish"] { border-color: var(--db-violet); box-shadow: 0 0 0 3px var(--db-violet-soft); }
+    .db-flow-n { display: grid; place-items: center; width: 1.8rem; height: 1.8rem; margin-bottom: 0.35rem; border-radius: 999px; background: var(--primary); color: var(--primary-foreground); font-weight: 700; font-size: 0.9rem; }
+    .db-flow-steps strong { font-size: 1.1rem; }
+    .db-flow-steps small { color: var(--muted-foreground); font-size: 0.92rem; }
+    .db-flow-crash { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin-top: 1.25rem; color: var(--muted-foreground); font-size: 1rem; }
+    @media (max-width: 48rem) {
+      .db-flow-steps { grid-template-columns: 1fr; gap: 1.6rem; }
+      .db-flow-steps li:not(:last-child)::after { inset-inline-start: calc(50% - 1px); top: calc(100% + 0.3rem); width: 2px; height: 0.8rem; }
+      .db-flow-steps li:not(:last-child)::before { inset-inline-start: calc(50% - 5px); top: calc(100% + 1rem); border: 5px solid transparent; border-top: 7px solid var(--db-violet); }
+    }
+
+    /* Benchmarks: one tile per operation, Node.js and Bun side by side. */
+    .db-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr)); gap: 1rem; margin-top: 2rem; }
+    .db-stat { padding: 1.2rem 1.35rem; background: var(--card); border: 1px solid var(--border); }
+    .db-stat h3 { margin: 0; font-size: 1.15rem; }
+    .db-stat-what { margin: 0.15rem 0 0.9rem; color: var(--muted-foreground); font-size: 0.95rem; }
+    .db-stat dl { margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+    .db-stat dt { font-size: 0.82rem; color: var(--muted-foreground); }
+    .db-stat dd { margin: 0; font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+    .db-details { margin-top: 1.5rem; padding: 1rem 1.25rem; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); }
+    .db-details summary { cursor: pointer; font-weight: 600; }
+    .db-details p { color: var(--muted-foreground); font-size: 0.95rem; margin: 0.75rem 0 0; }
+    .db-details td { font-variant-numeric: tabular-nums; }
+
+    /* Footer with the consulting card */
+    .db-footer .mk-footer-inner { padding: clamp(3rem, 6vw, 4.5rem) 1rem 5rem; }
+    .db-footer-nav.mk-footer-nav { grid-template-columns: repeat(3, minmax(max-content, 1fr)) 1.8fr; }
+    @media (max-width: 64rem) { .db-footer-nav.mk-footer-nav { grid-template-columns: repeat(3, minmax(0, 1fr)); } .db-footer-nav > .mk-footer-col:last-child { grid-column: 1 / -1; } }
+    @media (max-width: 40rem) { .db-footer-nav.mk-footer-nav { grid-template-columns: minmax(0, 1fr); } }
+    .db-ad { --shape-round: 2rem; display: flex; flex-direction: column; gap: 0.875rem; padding: 1.25rem; border: 1px solid var(--border); box-shadow: var(--shadow-lg);
+      background: linear-gradient(135deg, color-mix(in oklch, var(--db-violet) 16%, var(--card)), var(--card) 65%); }
+    .db-ad-head { display: flex; align-items: center; gap: 0.875rem; }
+    .db-ad-portrait { flex: none; width: 5rem; }
+    .db-ad-portrait img { display: block; width: 100%; height: auto; }
+    .db-ad-name { margin: 0; font-size: 1.2rem; font-weight: 600; color: var(--foreground); }
+    .db-ad-role { margin: 0; font-size: 0.9375rem; font-weight: 500; line-height: 1.5; color: var(--foreground); }
+    .db-ad .btn { align-self: flex-start; }
+
+
+    /* Performance band with wave edges */
+    .db-band { position: relative; isolation: isolate; padding-block: clamp(4rem, 8vw, 6rem); background: var(--muted); }
+    .db-band-pattern { position: absolute; inset: 0; z-index: -1; --shape-ink: color-mix(in oklch, var(--foreground) 6%, transparent); --shape-pattern: 22px; }
+    .db-scope { margin-top: 1rem; font-size: 0.9rem; color: var(--muted-foreground); max-width: 52rem; }
+
+    .db-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 21rem), 1fr)); gap: 1.25rem; margin-top: 2rem; }
+    .db-choice { display: flex; flex-direction: column; gap: 0.6rem; padding: 1.4rem 1.5rem; background: var(--card); border: 1px solid var(--border); border-radius: calc(var(--radius) * 1.4); }
+    .db-choice h3 { margin: 0; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.09em; color: var(--primary); }
+    .db-chosen { margin: 0; font-size: 1.2rem; font-weight: 650; line-height: 1.3; letter-spacing: -0.01em; }
+    .db-instead { margin: 0; color: var(--muted-foreground); font-size: 0.98rem; }
+    .db-choice dl { margin: 0.4rem 0 0; display: grid; gap: 0.6rem; padding-top: 0.9rem; border-top: 1px dashed var(--border); }
+    .db-choice dl div { display: grid; grid-template-columns: 3.4rem 1fr; gap: 0.75rem; align-items: baseline; }
+    .db-choice dt { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; padding: 0.15rem 0; text-align: center; border-radius: 999px; }
+    .db-choice [data-kind="gain"] dt { background: var(--db-violet-soft); color: var(--primary); }
+    .db-choice [data-kind="cost"] dt { background: var(--db-amber-soft); color: var(--db-amber); }
+    .db-choice dd { margin: 0; font-size: 1rem; line-height: 1.5; }
+
+    .db-install { padding: clamp(1.25rem, 3vw, 2.25rem); border: 1px solid var(--border); background: var(--card); }
+    .db-cmd { display: inline-flex; align-items: center; gap: 0.75rem; margin: 1.25rem 0; padding: 0.6rem 0.9rem; border-radius: var(--radius); background: var(--muted); font-family: var(--font-mono); }
+    .db-cmd::before { content: "$"; color: var(--muted-foreground); }
+    .tab-content p { color: var(--muted-foreground); }
+
+    /* The call to action stays dark in both themes, so the nebula shader and white text keep their contrast. */
+    .db-cta { --foreground: #fff; --muted-foreground: rgb(255 255 255 / 0.8); --border: rgb(255 255 255 / 0.3); --background: #0f0a24; --primary: #8f6cf5; --primary-foreground: #0f0a24;
+      position: relative; isolation: isolate; overflow: hidden; color: #fff; background: #0f0a24; border-radius: calc(var(--radius) * 2); }
+    .db-cta .mk-cta-inner { position: relative; background: transparent; }
+    .db-cta .mk-cta-desc, .db-cta .mk-cta-note { color: rgb(255 255 255 / 0.82); }
+
+    .db-footer .mk-footer-inner { max-width: 76rem; margin-inline: auto; }
+    .db-menu { display: none; }
+    @media (max-width: 48rem) { .db-menu { display: inline-flex; } }
+    @media (max-width: 40rem) { .db-ledger { grid-template-columns: 1fr; } }
+  </style>
+  <script type="module" src="https://cdn.jsdelivr.net/gh/kyr0/defuss-shadcn@v0.9.14/dist/components/all.js" integrity="sha384-Mq1xC+XFY/imVL24hx8azU48HFzatfOfXQgT7k9Y4MBZmRBG7TDiKCUcnwHGGzZa" crossorigin="anonymous"></script>
+  <script type="module" src="https://cdn.jsdelivr.net/gh/kyr0/defuss-shadcn@v0.9.14/dist/components/shader/shader.js" integrity="sha384-ii/hVHqhXyczuS5j5KWW+JLr75Blxl1KcjczeHFoNEPJayV3UJh2ZA/hKZnGUZ/j" crossorigin="anonymous"></script>
+  <script type="module" src="assets/demo.js"></script>
+</head>
+<body>
+<svg class="sr-only" aria-hidden="true" width="0" height="0">
+  <symbol id="i-logo" viewBox="0 0 24 24"><path d="M12 3v4M12 7 6 11M12 7l6 4M6 11l-3 4M6 11l3 4M18 11l-3 4M18 11l3 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="3.5" r="1.8" fill="currentColor"/><g fill="currentColor"><rect x="1.5" y="15.5" width="3.5" height="5" rx="1"/><rect x="7.25" y="15.5" width="3.5" height="5" rx="1"/><rect x="13.25" y="15.5" width="3.5" height="5" rx="1"/><rect x="19" y="15.5" width="3.5" height="5" rx="1"/></g></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></g></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+  <symbol id="i-github" viewBox="0 0 24 24"><path fill="currentColor" d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.38-5.25 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="i-linkedin" viewBox="0 0 24 24"><path fill="currentColor" d="M20.45 20.45h-3.56v-5.57c0-1.33-.02-3.04-1.85-3.04-1.86 0-2.14 1.45-2.14 2.94v5.67H9.34V9h3.42v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.46v6.28ZM5.34 7.43a2.06 2.06 0 1 1 0-4.13 2.06 2.06 0 0 1 0 4.13ZM7.12 20.45H3.56V9h3.56v11.45ZM22.22 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.73V1.73C24 .77 23.2 0 22.22 0Z"/></symbol>
+  <symbol id="i-external" viewBox="0 0 24 24"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-tree" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="4.5" r="2"/><path d="M12 6.5v3M12 9.5 5.5 13M12 9.5l6.5 3.5M12 9.5V13"/><rect x="3" y="14" width="5" height="5" rx="1.2"/><rect x="9.5" y="14" width="5" height="5" rx="1.2"/><rect x="16" y="14" width="5" height="5" rx="1.2"/></g></symbol>
+  <symbol id="i-branch" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="9" r="2"/><path d="M6 7v10M18 11c0 4-6 3-11 6.5"/></g></symbol>
+  <symbol id="i-slots" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3.5" width="16" height="7" rx="1.6"/><rect x="4" y="13.5" width="16" height="7" rx="1.6"/><path d="m8 7 1.5 1.5L12.5 5.5M8 17h4"/></g></symbol>
+  <symbol id="i-cache" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2.5V6M15 2.5V6M9 18v3.5M15 18v3.5M2.5 9H6M2.5 15H6M18 9h3.5M18 15h3.5"/><rect x="9.5" y="9.5" width="5" height="5" rx="0.8"/></g></symbol>
+  <symbol id="i-frame" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 13l2 2 4-4"/></g></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3M12 14.5v2.5"/></g></symbol>
+  <symbol id="i-camera" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></g></symbol>
+  <symbol id="i-flush" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v10m-4-4 4 4 4-4"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/><path d="M7.5 17.5h.01"/></g></symbol>
+  <symbol id="i-merge" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v6a5 5 0 0 0 5 5h0a5 5 0 0 0 5-5V4"/><path d="M12 15v6M9 18l3 3 3-3"/></g></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></g></symbol>
+  <symbol id="i-flask" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 3h5M10.5 3v6L5 19a1.5 1.5 0 0 0 1.3 2h11.4A1.5 1.5 0 0 0 19 19l-5.5-10V3"/><path d="M7.5 15h9"/></g></symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2.5 5 13.5h6l-1 8 8-11h-6z"/></g></symbol>
+  <symbol id="i-cpu" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></g></symbol>
+  <symbol id="i-gauge" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 18a8.5 8.5 0 1 1 15 0"/><path d="m12 13 4-4.5"/></g></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.6 3.5 5.5 3.5 8.5s-1 5.9-3.5 8.5c-2.5-2.6-3.5-5.5-3.5-8.5s1-5.9 3.5-8.5Z"/></g></symbol>
+  <symbol id="i-box" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/></g></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M3.5 9h17M3.5 14.5h17M9.5 9v11"/></g></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-7-7 7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-types" viewBox="0 0 24 24"><path d="M4 7V5h16v2M9 19h6M12 5v14"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5"/></symbol>
+  <symbol id="i-atom" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="m8.5 12 2.5 2.5 4.5-5"/></symbol>
+  <symbol id="i-open" viewBox="0 0 24 24"><path d="M4 20h16M6 16V9M10 16V5M14 16v-6M18 16V8"/></symbol>
+  <symbol id="i-share" viewBox="0 0 24 24"><rect x="3" y="11" width="7" height="9" rx="2"/><rect x="14" y="11" width="7" height="9" rx="2"/><path d="M6.5 11V8a5.5 5.5 0 0 1 11 0v3"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V6l-8-3Z"/><path d="M9 12h6"/></symbol>
+</svg>
+
+<a class="skip-link sr-only" href="#main">Skip to content</a>
+
+<header class="mk-header" data-variant="floating">
+  <div class="mk-header-inner">
+    <a href="#top" class="mk-header-brand" aria-label="defuss-dbsonl home"><svg class="db-brand-mark" aria-hidden="true"><use href="#i-logo"/></svg><span class="mk-header-name">defuss-dbsonl</span></a>
+    <nav class="mk-header-nav" aria-label="Main">
+      <ul class="nav-menu-list">
+        <li class="nav-menu-item"><a class="nav-menu-link" href="#why">Why</a></li>
+        <li class="nav-menu-item"><a class="nav-menu-link" href="#demo">Demo</a></li>
+        <li class="nav-menu-item"><a class="nav-menu-link" href="#how">How it works</a></li>
+        <li class="nav-menu-item"><a class="nav-menu-link" href="#tests">Tests</a></li>
+        <li class="nav-menu-item"><a class="nav-menu-link" href="#performance">Benchmarks</a></li>
+        <li class="nav-menu-item"><a class="nav-menu-link" href="#install">Setup</a></li>
+      </ul>
+    </nav>
+    <div class="mk-header-actions">
+      <label class="swap" data-variant="rotate" data-size="sm">
+        <input type="checkbox" id="theme-toggle" aria-label="Dark mode">
+        <span class="swap-on" aria-hidden="true"><svg width="18" height="18"><use href="#i-moon"/></svg></span>
+        <span class="swap-off" aria-hidden="true"><svg width="18" height="18"><use href="#i-sun"/></svg></span>
+      </label>
+      <a class="btn" data-variant="ghost" data-size="icon" href="https://github.com/kyr0/defuss-dbjsonl" target="_blank" rel="noopener" aria-label="defuss-dbsonl on GitHub (opens in a new tab)"><svg width="18" height="18" aria-hidden="true"><use href="#i-github"/></svg></a>
+      <button type="button" class="btn db-menu" data-variant="ghost" data-size="icon" data-sheet-trigger="db-sheet" aria-haspopup="dialog" aria-label="Open menu"><svg width="18" height="18" aria-hidden="true"><use href="#i-menu"/></svg></button>
+    </div>
+  </div>
+</header>
+<dialog id="db-sheet" class="sheet" data-side="right" aria-modal="true" aria-labelledby="db-sheet-title">
+  <div class="sheet-content">
+    <div class="sheet-header"><h2 class="sheet-title" id="db-sheet-title">defuss-dbsonl</h2></div>
+    <div class="sheet-body">
+      <ul class="mk-header-sheet-nav">
+        <li><a data-sheet-close href="#why">Why</a></li>
+        <li><a data-sheet-close href="#demo">Demo</a></li>
+        <li><a data-sheet-close href="#how">How it works</a></li>
+        <li><a data-sheet-close href="#tests">Tests</a></li>
+        <li><a data-sheet-close href="#performance">Benchmarks</a></li>
+        <li><a data-sheet-close href="#install">Setup</a></li>
+      </ul>
+    </div>
+  </div>
+</dialog>
+
+<main id="main" class="db-main" tabindex="-1">
+
+  <section class="db-hero" id="top" aria-labelledby="hero-title">
+    <div class="pattern-grid db-hero-grid" aria-hidden="true"></div>
+    <div class="corner-blob db-blob db-blob-a" aria-hidden="true"></div>
+    <div class="corner-blob-3 db-blob db-blob-b" aria-hidden="true"></div>
+    <div class="mk-hero" data-variant="split" data-align="start">
+      <div class="mk-hero-copy">
+        <a class="mk-hero-pill" href="#install"><span class="badge" data-size="sm">v0.4.0</span><span>MIT licensed, ESM and CommonJS, TypeScript declarations</span></a>
+        <h1 class="mk-hero-title db-display" id="hero-title">Transactional key-value storage for <em>DSON</em></h1>
+        <p class="mk-hero-desc">defuss-dbsonl runs on Node.js, Bun and in dedicated browser workers. Batches and transactions publish all of their changes or none, snapshots keep reading the state they opened on, and several processes or workers can share one database.</p>
+        <p class="db-dson"><a class="db-link" href="https://dson.defuss.org">DSON</a> is typed JSON that keeps <span class="text-rotate db-rotate" data-effect="fade" style="--text-rotate-duration:12s"><span><span>Map and Set</span><span>Date and RegExp</span><span>bigint</span><span>typed arrays</span><span>undefined and NaN</span><span>cyclic references</span></span></span></p>
+        <div class="mk-hero-actions">
+          <span class="aura aura-glow"><a class="btn" data-size="lg" href="#demo"><span>Try it in this tab<sup aria-hidden="true">*</sup></span><svg width="18" height="18" aria-hidden="true"><use href="#i-arrow"/></svg></a></span>
+          <a class="btn" data-variant="outline" data-size="lg" href="https://github.com/kyr0/defuss-dbjsonl/blob/main/docs/API.md">Read the API</a>
+        </div>
+        <p class="db-footnote"><span aria-hidden="true">*</span> The demos run the packaged library in your tab. Three use memory storage; one keeps a counter in your browser's origin private file system (OPFS).</p>
+      </div>
+      <div class="mk-hero-media">
+        <figure class="db-window">
+          <div class="shader" data-variant="background" data-effect="voronoi" data-colors="#1d1240 #4b2bb8 #8f6cf5 #b86e0c" data-speed="0.4" aria-hidden="true"></div>
+          <div class="mockup-code" data-chrome="mac" data-title="transfer.ts" data-numbers data-wrap tabindex="0" role="region" aria-label="Example: a transfer in one transaction">
+<pre><code><span class="k">import</span> { openDbsonl } <span class="k">from</span> <span class="s">'defuss-dbsonl'</span>;</code></pre>
+<pre><code><span class="k">import</span> { createFileBackend } <span class="k">from</span> <span class="s">'defuss-dbsonl/server'</span>;</code></pre>
+<pre><code></code></pre>
+<pre><code><span class="k">const</span> db = <span class="k">await</span> openDbsonl&lt;number&gt;(</code></pre>
+<pre><code>  <span class="k">await</span> createFileBackend(<span class="s">'./data'</span>), <span class="s">'accounts'</span>, { create: <span class="k">true</span> });</code></pre>
+<pre><code></code></pre>
+<pre><code><span class="k">const</span> before = <span class="k">await</span> db.beginRead();</code></pre>
+<pre><code><span class="k">await</span> db.transaction(<span class="k">async</span> tx =&gt; {</code></pre>
+<pre><code>  <span class="k">const</span> alice = (<span class="k">await</span> tx.get(<span class="s">'alice'</span>)).value!;</code></pre>
+<pre><code>  <span class="k">const</span> bob = (<span class="k">await</span> tx.get(<span class="s">'bob'</span>)).value!;</code></pre>
+<pre><code>  tx.put(<span class="s">'alice'</span>, alice - 20);</code></pre>
+<pre><code>  tx.put(<span class="s">'bob'</span>, bob + 20); <span class="c">// both or neither</span></code></pre>
+<pre><code>});</code></pre>
+<pre><code><span class="k">await</span> before.get(<span class="s">'alice'</span>); <span class="c">// still the old balance</span></code></pre>
+<pre><code><span class="k">await</span> before.close();</code></pre>
+          </div>
+          <figcaption>The snapshot <code>before</code> keeps its root while the transaction commits.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="db-section" id="why" aria-labelledby="why-title">
+    <h2 class="db-h2 db-display" id="why-title">What you get</h2>
+    <div class="db-features">
+      <article class="db-feature">
+        <span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-types"/></svg></span>
+        <h3>Values keep their types</h3>
+        <p>Values are stored as DSON, typed JSON from <a class="db-link" href="https://dson.defuss.org">defuss-dson</a>: Map, Set, Date, RegExp, bigint, typed arrays, <code>undefined</code>, NaN and cyclic references come back as they went in. JSON turns a Map into <code>{}</code> and a date into a string, and throws on a bigint.</p>
+      </article>
+      <article class="db-feature">
+        <span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-layers"/></svg></span>
+        <h3>Readers never block writers</h3>
+        <p>A snapshot pins one immutable root of the tree. Commits keep publishing while it reads, and it sees none of them until you open a new one.</p>
+      </article>
+      <article class="db-feature">
+        <span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-atom"/></svg></span>
+        <h3>All changes or none</h3>
+        <p>A batch or a transaction becomes visible as one revision. A transaction fails with <code>CONFLICT</code> when any other commit published after its snapshot, which rules out write skew.</p>
+      </article>
+      <article class="db-feature">
+        <span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-open"/></svg></span>
+        <h3>Opens fast, however much it holds</h3>
+        <p>A log-based store replays its log on open, so startup slows as data grows. defuss-dbsonl reads a small header that points at the current tree, not the stored data; the benchmark reopened a database in 0.52 ms on Node.js. Memory is capped by the page cache budget, not by the number of keys.</p>
+      </article>
+      <article class="db-feature">
+        <span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-share"/></svg></span>
+        <h3>Shared by processes and tabs</h3>
+        <p>Servers coordinate through kernel file locks, browser workers through Web Locks. A process that dies releases its locks, and no lock expires on a timer, so a paused writer never loses ownership.</p>
+      </article>
+      <article class="db-feature">
+        <span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-shield"/></svg></span>
+        <h3>Corruption fails closed</h3>
+        <p>Every frame carries a CRC32C checksum, and <code>verify()</code> walks every reachable value and index page. Nothing repairs data by guessing, because a guessed repair can turn damage into silent data loss.</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="db-section" id="stack" aria-labelledby="stack-title">
+    <span class="mk-section-header-eyebrow">Where it fits</span>
+    <h2 class="db-h2 db-display" id="stack-title">The storage and API layer for defuss-dataview</h2>
+    <p class="db-lead">defuss-dbsonl is designed as the backing store and API of <a class="db-link" href="https://dataview.defuss.org">defuss-dataview</a>. It turns the byte I/O of <a class="db-link" href="https://storage.defuss.org">defuss-storage</a> into a transactional key-value store and encodes every value with <a class="db-link" href="https://dson.defuss.org">defuss-dson</a>.</p>
+    <figure class="db-stack" aria-label="Package layers from defuss-dataview down to the storage media">
+      <div class="db-layer" data-kind="app"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-grid"/></svg></span><div><strong>defuss-dataview</strong><span>Filters, sorting, paging and tree traversal for table and tree grids</span></div></div>
+      <div class="db-layer" data-kind="self"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-tree"/></svg></span><div><strong>defuss-dbsonl <span class="badge" data-size="sm">this package</span></strong><span>Transactions, snapshots, the B+tree index, locks and compaction</span></div></div>
+      <div class="db-layer-row">
+        <div class="db-layer"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-frame"/></svg></span><div><strong><a class="db-link" href="https://dson.defuss.org">defuss-dson</a></strong><span>Typed JSON in frames with CRC32C checksums</span></div></div>
+        <div class="db-layer"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-box"/></svg></span><div><strong><a class="db-link" href="https://storage.defuss.org">defuss-storage</a></strong><span>Bounded byte I/O, one API for every medium</span></div></div>
+      </div>
+      <ul class="db-media" aria-label="Storage media">
+        <li>Native file system</li><li>OPFS and directory handles</li><li>Memory</li>
+      </ul>
+    </figure>
+  </section>
+
+  <section class="db-section" id="demo" aria-labelledby="demo-title">
+    <header class="mk-section-header" data-align="center">
+      <div class="mk-section-header-copy">
+        <span class="mk-section-header-eyebrow">Live demo</span>
+        <h2 class="mk-section-header-title db-display" id="demo-title">Four guarantees you can test here</h2>
+        <p class="mk-section-header-desc">Each card runs defuss-dbsonl in this tab, built from the same package entries you install. The demos send no network requests.</p>
+      </div>
+    </header>
+    <noscript><div class="alert" role="status"><h3 class="alert-title">JavaScript is off</h3><p class="alert-description">The demos need JavaScript; the rest of the page works without it.</p></div></noscript>
+    <div class="db-demos">
+      <article class="card db-demo" aria-labelledby="snap-title">
+        <div class="card-header">
+          <h3 class="card-title" id="snap-title">A snapshot keeps its root</h3>
+          <p class="card-description">Isolation without read locks</p>
+        </div>
+        <div class="card-content">
+          <p>The left side reads the latest commit. The right side reads a snapshot, opened when the page loaded or when you last opened a new one. Each transfer is a transaction that moves 20 from alice to bob in one commit.</p>
+          <div class="db-ledger">
+            <section data-kind="live"><h4>Latest, revision <span id="snap-live-rev">0</span></h4><dl><dt>alice</dt><dd id="snap-live-alice">0</dd><dt>bob</dt><dd id="snap-live-bob">0</dd></dl></section>
+            <section data-kind="pin"><h4>Snapshot, revision <span id="snap-pin-rev">0</span></h4><dl><dt>alice</dt><dd id="snap-pin-alice">0</dd><dt>bob</dt><dd id="snap-pin-bob">0</dd></dl></section>
+          </div>
+          <p class="db-note" id="snap-note" role="status"></p>
+          <div class="db-actions">
+            <button class="btn" type="button" id="snap-transfer">Transfer 20</button>
+            <button class="btn" type="button" data-variant="outline" id="snap-refresh">Open a new snapshot</button>
+          </div>
+        </div>
+      </article>
+
+      <article class="card db-demo" aria-labelledby="conflict-title">
+        <div class="card-header">
+          <h3 class="card-title" id="conflict-title">A stale transaction fails</h3>
+          <p class="card-description">Optimistic concurrency, no silent retry</p>
+        </div>
+        <div class="card-content">
+          <p>Transaction A reads <code>visits</code> and waits. Writer B commits in between. When A publishes, its snapshot is stale, so it fails with <code>CONFLICT</code>. The library does not retry, because a retry would run your callback and its side effects again.</p>
+          <p class="db-big"><span id="conflict-value">0</span><small>visits</small></p>
+          <ol class="db-log" id="conflict-log" aria-live="polite"></ol>
+          <div class="db-actions">
+            <button class="btn" type="button" id="conflict-run">Run the race</button>
+            <button class="btn" type="button" data-variant="outline" id="conflict-retry">Retry explicitly</button>
+          </div>
+        </div>
+      </article>
+
+      <article class="card db-demo" aria-labelledby="types-title">
+        <div class="card-header">
+          <h3 class="card-title" id="types-title">Values come back as they went in</h3>
+          <p class="card-description">DSON instead of JSON</p>
+        </div>
+        <div class="card-content">
+          <p>The button stores one object with a date, bytes, a bigint, an <code>undefined</code> property and a reference to itself, then reads it back and checks each field.</p>
+          <div class="table-container">
+            <table class="table db-types">
+              <thead><tr><th scope="col">Field</th><th scope="col">Read back</th><th scope="col">Result</th></tr></thead>
+              <tbody id="types-out"><tr><td colspan="3">Not stored yet.</td></tr></tbody>
+            </table>
+          </div>
+          <div class="db-actions"><button class="btn" type="button" id="types-run">Store and read back</button></div>
+        </div>
+      </article>
+
+      <article class="card db-demo" aria-labelledby="persist-title">
+        <div class="shader" data-variant="border" data-effect="pulsing-border" data-colors="#6d3fe0 #b86e0c #8f6cf5" aria-hidden="true"></div>
+        <div class="card-header">
+          <h3 class="card-title" id="persist-title">It survives a reload</h3>
+          <p class="card-description">OPFS in a dedicated worker</p>
+        </div>
+        <div class="card-content">
+          <p>This counter lives in a database in your browser's origin private file system. Reload the page and it keeps its value. Open the page in a second tab: both tabs' workers write the same database, and Web Locks order their commits.</p>
+          <p class="db-big"><span id="persist-count">0</span><small>revision <span id="persist-rev">0</span></small></p>
+          <p class="db-note" id="persist-status" role="status">Starting the worker.</p>
+          <div class="db-actions">
+            <button class="btn" type="button" id="persist-inc">Add one</button>
+            <button class="btn" type="button" data-variant="outline" id="persist-reset">Delete the counter</button>
+          </div>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section class="db-section" id="internals" aria-labelledby="internals-title">
+    <span class="mk-section-header-eyebrow">Building blocks</span>
+    <h2 class="db-h2 db-display" id="internals-title">Six parts, one store</h2>
+    <div class="db-features">
+      <article class="db-feature"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-tree"/></svg></span><h3>Copy-on-write B+tree</h3><p>Fanout 32. A commit rewrites the path from leaf to root and never changes a written page.</p></article>
+      <article class="db-feature"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-branch"/></svg></span><h3>Immutable roots</h3><p>Every revision is a root. A snapshot pins one and reads it while new roots are published.</p></article>
+      <article class="db-feature"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-slots"/></svg></span><h3>Two head slots</h3><p>Two checksummed 4 KiB slots name the current root. Writers alternate between them; the newest valid slot wins.</p></article>
+      <article class="db-feature"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-frame"/></svg></span><h3>DSON frames</h3><p>Values and index pages are DSON frames with a length, a header CRC32C and a payload CRC32C.</p></article>
+      <article class="db-feature"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-cache"/></svg></span><h3>Bounded page cache</h3><p>Decoded index pages stay in an LRU cache limited by bytes and page count. Values are always read fresh.</p></article>
+      <article class="db-feature"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-lock"/></svg></span><h3>Lock order</h3><p>Commit lock, then generation pin, then I/O lock. Kernel locks on servers, Web Locks in browsers, no timeouts.</p></article>
+    </div>
+  </section>
+
+  <section class="db-section" id="how" aria-labelledby="how-title">
+    <span class="mk-section-header-eyebrow">How it works</span>
+    <h2 class="db-h2 db-display" id="how-title">One commit, crash-safe at every step</h2>
+    <p class="db-lead">A commit writes next to the old data, never over it, and switches with one small write at the end.</p>
+    <figure class="db-flow" aria-labelledby="flow-caption">
+      <ol class="db-flow-steps">
+        <li><span class="db-flow-n" aria-hidden="true">1</span><strong>Lock</strong><small>one writer at a time</small></li>
+        <li><span class="db-flow-n" aria-hidden="true">2</span><strong>Append</strong><small>values and index pages</small></li>
+        <li><span class="db-flow-n" aria-hidden="true">3</span><strong>Flush</strong><small>bytes reach the device</small></li>
+        <li data-kind="publish"><span class="db-flow-n" aria-hidden="true">4</span><strong>Publish</strong><small>the older of two head slots</small></li>
+      </ol>
+      <figcaption id="flow-caption" class="db-flow-crash"><span class="badge" data-variant="outline">Crash before step 4</span> The previous head still points at a complete tree.</figcaption>
+    </figure>
+  </section>
+
+  <section class="db-section" id="design" aria-labelledby="choices-title">
+    <span class="mk-section-header-eyebrow">Design choices</span>
+    <h2 class="db-h2 db-display" id="choices-title">What each choice costs</h2>
+    <p class="db-lead">Each card names the design in use, the obvious alternative, why the alternative lost and what the choice costs.</p>
+    <div class="db-choices">
+      <article class="db-choice">
+        <h3>Finding keys</h3>
+        <p class="db-chosen">Persistent B+tree with fanout 32 and a bounded page cache</p>
+        <p class="db-instead">Instead of an in-memory key map rebuilt from a log</p>
+        <dl>
+          <div data-kind="gain"><dt>Why</dt><dd>Memory does not grow with the number of keys, and opening needs no replay.</dd></div>
+          <div data-kind="cost"><dt>Cost</dt><dd>A point read whose page is not cached reads from disk.</dd></div>
+        </dl>
+      </article>
+      <article class="db-choice">
+        <h3>Readers and writers</h3>
+        <p class="db-chosen">Immutable roots, pinned per snapshot</p>
+        <p class="db-instead">Instead of read locks that block commits</p>
+        <dl>
+          <div data-kind="gain"><dt>Why</dt><dd>A slow reader cannot stall a writer.</dd></div>
+          <div data-kind="cost"><dt>Cost</dt><dd>Old generations stay on disk until their readers close.</dd></div>
+        </dl>
+      </article>
+      <article class="db-choice">
+        <h3>Atomic publication</h3>
+        <p class="db-chosen">Two checksummed head slots, written alternately</p>
+        <p class="db-instead">Instead of writing a new file, then renaming it</p>
+        <dl>
+          <div data-kind="gain"><dt>Why</dt><dd>OPFS and Storage offer no uniform atomic rename.</dd></div>
+          <div data-kind="cost"><dt>Cost</dt><dd>Every commit writes one 4 KiB slot.</dd></div>
+        </dl>
+      </article>
+      <article class="db-choice">
+        <h3>Several writers</h3>
+        <p class="db-chosen">OS whole-file locks or Web Locks, held per commit</p>
+        <p class="db-instead">Instead of one process that owns the database</p>
+        <dl>
+          <div data-kind="gain"><dt>Why</dt><dd>Independent processes and workers share one database.</dd></div>
+          <div data-kind="cost"><dt>Cost</dt><dd>Commits serialize, so revisions keep a single order.</dd></div>
+        </dl>
+      </article>
+      <article class="db-choice">
+        <h3>Transactions</h3>
+        <p class="db-chosen">One revision check for the whole database</p>
+        <p class="db-instead">Instead of per-key conflict detection</p>
+        <dl>
+          <div data-kind="gain"><dt>Why</dt><dd>It rules out write skew and range phantoms without tracking read sets.</dd></div>
+          <div data-kind="cost"><dt>Cost</dt><dd>Writers on disjoint keys can still conflict.</dd></div>
+        </dl>
+      </article>
+      <article class="db-choice">
+        <h3>Space reuse</h3>
+        <p class="db-chosen">Explicit <code>compact()</code> and <code>collect()</code></p>
+        <p class="db-instead">Instead of in-place updates or a background vacuum</p>
+        <dl>
+          <div data-kind="gain"><dt>Why</dt><dd>No hidden I/O: the application decides when to pay.</dd></div>
+          <div data-kind="cost"><dt>Cost</dt><dd>Compaction needs disk space for one live copy.</dd></div>
+        </dl>
+      </article>
+      <article class="db-choice">
+        <h3>Stale locks</h3>
+        <p class="db-chosen">Kernel locks, released when a process dies</p>
+        <p class="db-instead">Instead of lock files that expire after a timeout</p>
+        <dl>
+          <div data-kind="gain"><dt>Why</dt><dd>A paused process never loses ownership to a second writer.</dd></div>
+          <div data-kind="cost"><dt>Cost</dt><dd>Servers need the native lock addon.</dd></div>
+        </dl>
+      </article>
+    </div>
+  </section>
+
+  <section class="db-band" id="performance" aria-labelledby="perf-title">
+    <div class="edge-wave-top" aria-hidden="true"></div>
+    <div class="pattern-dots db-band-pattern" aria-hidden="true"></div>
+    <div class="db-section">
+      <span class="mk-section-header-eyebrow">Benchmarks</span>
+      <h2 class="db-h2 db-display" id="perf-title">What an operation costs</h2>
+      <p class="db-lead">defuss-dbsonl 0.4.0 with native asynchronous I/O on an Apple M5 Max under macOS, Node.js 24.22.1 and Bun 1.4.3. Each figure is the median of three runs; every run takes the median of seven rounds over 1000 records after two warmups and checks every returned value.</p>
+      <div class="db-stats">
+        <div class="db-stat corner-leaf">
+          <h3>Point read</h3><p class="db-stat-what"><code>get()</code>, head checked on every call</p>
+          <dl><div><dt>Node.js</dt><dd>31.1 µs</dd></div><div><dt>Bun</dt><dd>41.1 µs</dd></div></dl>
+        </div>
+        <div class="db-stat corner-leaf">
+          <h3>Snapshot read</h3><p class="db-stat-what"><code>get()</code> on an open snapshot</p>
+          <dl><div><dt>Node.js</dt><dd>13.0 µs</dd></div><div><dt>Bun</dt><dd>17.4 µs</dd></div></dl>
+        </div>
+        <div class="db-stat corner-leaf">
+          <h3>Scan</h3><p class="db-stat-what">per row, in key order</p>
+          <dl><div><dt>Node.js</dt><dd>5.6 µs</dd></div><div><dt>Bun</dt><dd>9.4 µs</dd></div></dl>
+        </div>
+        <div class="db-stat corner-leaf">
+          <h3>Atomic batch</h3><p class="db-stat-what">1000 writes in one flushed commit</p>
+          <dl><div><dt>Node.js</dt><dd>18.7 ms</dd></div><div><dt>Bun</dt><dd>12.8 ms</dd></div></dl>
+        </div>
+        <div class="db-stat corner-leaf">
+          <h3>Compaction</h3><p class="db-stat-what">1000 live records copied</p>
+          <dl><div><dt>Node.js</dt><dd>24.7 ms</dd></div><div><dt>Bun</dt><dd>19.4 ms</dd></div></dl>
+        </div>
+        <div class="db-stat corner-leaf">
+          <h3>Reopen</h3><p class="db-stat-what">indexed open of an existing database</p>
+          <dl><div><dt>Node.js</dt><dd>0.52 ms</dd></div><div><dt>Bun</dt><dd>0.31 ms</dd></div></dl>
+        </div>
+      </div>
+      <details class="db-details">
+        <summary>All modes, in milliseconds per 1000 operations</summary>
+        <div class="table-container">
+          <table class="table">
+            <thead><tr><th scope="col">Runtime</th><th scope="col">Storage</th><th scope="col">Point read</th><th scope="col">Snapshot read</th><th scope="col">Scan</th><th scope="col">Batch</th><th scope="col">Compaction</th><th scope="col">Reopen</th></tr></thead>
+            <tbody>
+                <tr><td>Node.js</td><td>native async</td><td>31.14</td><td>12.98</td><td>5.55</td><td>18.68</td><td>24.65</td><td>0.52</td></tr>
+                <tr><td>Node.js</td><td>native sync</td><td>13.85</td><td>5.17</td><td>3.76</td><td>17.60</td><td>23.00</td><td>0.42</td></tr>
+                <tr><td>Node.js</td><td>memory</td><td>11.21</td><td>4.81</td><td>4.34</td><td>9.18</td><td>10.98</td><td>0.03</td></tr>
+                <tr><td>Bun</td><td>native async</td><td>41.10</td><td>17.35</td><td>9.37</td><td>12.84</td><td>19.37</td><td>0.31</td></tr>
+                <tr><td>Bun</td><td>native sync</td><td>28.45</td><td>8.24</td><td>6.86</td><td>12.54</td><td>16.81</td><td>0.32</td></tr>
+                <tr><td>Bun</td><td>memory</td><td>23.50</td><td>7.56</td><td>6.76</td><td>10.03</td><td>13.26</td><td>0.03</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Synchronous I/O is opt-in and blocks its thread, including during flushes; use it in a worker or CLI. Batch, compaction and reopen are per workload, not per operation.</p>
+      </details>
+      <p class="db-scope">Three runs with a warm file cache on a busy machine (load average 4.6 to 8.3). They do not measure cold-disk latency or power-loss behavior. Raw samples are in <a href="https://github.com/kyr0/defuss-dbjsonl/blob/main/validation/bench-macos-arm64.json">validation/bench-macos-arm64.json</a>, and <code>make bench</code> repeats the run on your machine.</p>
+    </div>
+    <div class="edge-wave-bottom" aria-hidden="true"></div>
+  </section>
+
+  <section class="db-section" id="tests" aria-labelledby="tests-title">
+    <span class="mk-section-header-eyebrow">Tests</span>
+    <h2 class="db-h2 db-display" id="tests-title">Tested on real files, locks and workers</h2>
+    <p class="db-lead">The tests run against real memory and native storage, real kernel locks and real browser workers, with no mocks: the defects that matter here, such as partial reads, torn slots and lock lifetimes, live inside the subsystems a mock would replace.</p>
+    <div class="db-rings">
+      <div class="db-ring"><div class="radial-progress" role="meter" aria-valuenow="24" aria-valuemin="0" aria-valuemax="24" data-format="value" style="--value:100" aria-label="24 of 24 tests pass">24</div><span>tests pass; 1 Linux-only test skipped on macOS</span></div>
+      <div class="db-ring"><div class="radial-progress" role="meter" aria-valuenow="90.19" aria-valuemin="0" aria-valuemax="100" style="--value:90.19" aria-label="90.19 percent statement coverage">90%</div><span>statements covered, 85% required</span></div>
+      <div class="db-ring"><div class="radial-progress" role="meter" aria-valuenow="85.41" aria-valuemin="0" aria-valuemax="100" style="--value:85.41" aria-label="85.41 percent branch coverage">85%</div><span>branches covered, 75% required</span></div>
+      <div class="db-ring"><div class="radial-progress" role="meter" aria-valuenow="96.7" aria-valuemin="0" aria-valuemax="100" style="--value:96.7" aria-label="96.7 percent function coverage">97%</div><span>functions covered, 85% required</span></div>
+      <div class="db-ring"><div class="radial-progress" role="meter" aria-valuenow="97.92" aria-valuemin="0" aria-valuemax="100" style="--value:97.92" aria-label="97.92 percent line coverage">98%</div><span>lines covered, 85% required</span></div>
+    </div>
+    <div class="db-features">
+      <article class="db-feature"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-tree"/></svg></span><h3>Tree against a Map</h3><p>Every tree result is compared with an independent Map, alongside atomic batches, snapshots, conflicts, phantoms and quota failures.</p><code class="db-file">mvcc.test.ts</code></article>
+      <article class="db-feature"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-bolt"/></svg></span><h3>Crashes and corruption</h3><p>Torn head slots, truncated and damaged data, publication boundaries and an interrupted create, written as real byte images.</p><code class="db-file">v2-recovery.test.ts</code></article>
+      <article class="db-feature"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-lock"/></svg></span><h3>Real kernel locks</h3><p>Independent native backends contend for real OS locks and hit real permission failures.</p><code class="db-file">native-v2.test.ts</code></article>
+      <article class="db-feature"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-cpu"/></svg></span><h3>Native I/O edges</h3><p>Descriptor limits, stale roots after another client compacts, partial reads and writes, large binary values.</p><code class="db-file">native-performance.test.ts</code></article>
+      <article class="db-feature"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-globe"/></svg></span><h3>Web Locks</h3><p>Shared pins, try-locks, cancelled waits and pinned generations through the browser backend.</p><code class="db-file">web-locks.test.ts</code></article>
+      <article class="db-feature"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-box"/></svg></span><h3>The packed package</h3><p>Node.js, Bun, ESM, CommonJS and types from the tarball; v0.2.0 and current writers killed mid-batch; Chromium workers; every demo on this page.</p><code class="db-file">make e2e</code></article>
+    </div>
+  </section>
+
+  <section class="db-section" id="guarantees" aria-labelledby="guarantees-title">
+    <span class="mk-section-header-eyebrow">Contract</span>
+    <h2 class="db-h2 db-display" id="guarantees-title">Guarantees</h2>
+    <ul class="db-guarantees">
+      <li class="db-feature"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-atom"/></svg></span><h3>All or nothing</h3><p>A batch or transaction becomes visible at once, as one revision, or not at all.</p></li>
+      <li class="db-feature"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-merge"/></svg></span><h3>Serializable transactions</h3><p>A transaction commits only if no other commit published after its snapshot; otherwise it fails with <code>CONFLICT</code> instead of running your callback again.</p></li>
+      <li class="db-feature"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-camera"/></svg></span><h3>Stable snapshots</h3><p>A snapshot reads the same root until you close it, while writers keep committing.</p></li>
+      <li class="db-feature"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-flush"/></svg></span><h3>Flushed before published</h3><p>Values and index pages reach the device before a head slot points at them. On servers, directory metadata is synced too.</p></li>
+      <li class="db-feature"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-slots"/></svg></span><h3>Crash-safe heads</h3><p>Two checksummed slots survive an interrupted write of either one. A writer reuses the unpublished tail of a failed commit.</p></li>
+      <li class="db-feature"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-shield"/></svg></span><h3>Fails closed</h3><p>Corrupt published data fails its checksum or <code>verify()</code>; nothing is repaired by guessing.</p></li>
+      <li class="db-feature"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-clock"/></svg></span><h3>Locks without timeouts</h3><p>Kernel locks and Web Locks are released when their process or worker ends, never by a clock.</p></li>
+    </ul>
+    <p class="db-scope">The platforms these guarantees were tested on, and the ones they were not, are listed in the <a href="https://github.com/kyr0/defuss-dbjsonl#guarantees-and-boundaries">README</a>.</p>
+  </section>
+
+  <section class="db-section" id="install" aria-labelledby="install-title">
+    <div class="db-install corner-leaf">
+      <span class="mk-section-header-eyebrow">Get started</span>
+      <h2 class="db-h2 db-display" id="install-title">Setup</h2>
+      <p class="db-lead">The package needs Node.js 20.19 or newer, Bun, or a dedicated worker in a browser with OPFS and Web Locks.</p>
+      <p class="db-cmd"><code>bun add defuss-dbsonl</code></p>
+      <div class="tabs">
+        <div class="tab-list" role="tablist" aria-label="Examples">
+          <button class="tab-trigger" role="tab" type="button" aria-selected="true" aria-controls="use-server" id="tab-server">Node.js and Bun</button>
+          <button class="tab-trigger" role="tab" type="button" aria-selected="false" aria-controls="use-browser" id="tab-browser" tabindex="-1">Browser worker</button>
+          <button class="tab-trigger" role="tab" type="button" aria-selected="false" aria-controls="use-memory" id="tab-memory" tabindex="-1">Memory and tests</button>
+        </div>
+        <div class="tab-content" role="tabpanel" id="use-server" aria-labelledby="tab-server" tabindex="0">
+          <p>The <code>/server</code> entry adds kernel file locks and directory sync. Every process that opens the same directory joins the same lock protocol.</p>
+          <div class="mockup-code" data-chrome="mac" data-title="server.ts" data-numbers>
+<pre><code><span class="k">import</span> { openDbsonl } <span class="k">from</span> <span class="s">'defuss-dbsonl'</span>;</code></pre>
+<pre><code><span class="k">import</span> { createFileBackend } <span class="k">from</span> <span class="s">'defuss-dbsonl/server'</span>;</code></pre>
+<pre><code></code></pre>
+<pre><code><span class="k">const</span> db = <span class="k">await</span> openDbsonl(<span class="k">await</span> createFileBackend(<span class="s">'./data'</span>), <span class="s">'orders'</span>, { create: <span class="k">true</span> });</code></pre>
+<pre><code><span class="k">await</span> db.batch([</code></pre>
+<pre><code>  { operation: <span class="s">'put'</span>, key: <span class="s">'order:1'</span>, value: { placed: <span class="k">new</span> Date(), total: 4200n } },</code></pre>
+<pre><code>  { operation: <span class="s">'delete'</span>, key: <span class="s">'cart:1'</span> },</code></pre>
+<pre><code>]);</code></pre>
+<pre><code><span class="k">await</span> db.close();</code></pre>
+          </div>
+        </div>
+        <div class="tab-content" role="tabpanel" id="use-browser" aria-labelledby="tab-browser" tabindex="0" hidden>
+          <p>OPFS grants synchronous access handles only to dedicated workers, so the database runs in one. Every worker that reaches the same files must use the same namespace, because the namespace names their shared Web Locks.</p>
+          <div class="mockup-code" data-chrome="mac" data-title="db.worker.ts" data-numbers>
+<pre><code><span class="k">import</span> { createOPFSStorage } <span class="k">from</span> <span class="s">'defuss-storage/opfs'</span>;</code></pre>
+<pre><code><span class="k">import</span> { createBrowserBackend } <span class="k">from</span> <span class="s">'defuss-dbsonl/browser'</span>;</code></pre>
+<pre><code><span class="k">import</span> { openDbsonl } <span class="k">from</span> <span class="s">'defuss-dbsonl'</span>;</code></pre>
+<pre><code></code></pre>
+<pre><code><span class="k">const</span> storage = <span class="k">await</span> createOPFSStorage({ name: <span class="s">'my-app'</span> });</code></pre>
+<pre><code><span class="k">const</span> backend = createBrowserBackend(storage, <span class="s">'my-app'</span>, navigator.locks);</code></pre>
+<pre><code><span class="k">const</span> db = <span class="k">await</span> openDbsonl(backend, <span class="s">'documents'</span>, { create: <span class="k">true</span> });</code></pre>
+<pre><code><span class="k">await</span> db.put(<span class="s">'hello'</span>, { bytes: <span class="k">new</span> Uint8Array([42]), time: <span class="k">new</span> Date() });</code></pre>
+          </div>
+        </div>
+        <div class="tab-content" role="tabpanel" id="use-memory" aria-labelledby="tab-memory" tabindex="0" hidden>
+          <p>Memory storage needs no platform entry. Clients coordinate only when they share the same backend object, which suits tests and short-lived caches.</p>
+          <div class="mockup-code" data-chrome="mac" data-title="memory.ts" data-numbers>
+<pre><code><span class="k">import</span> { createMemoryBackend, openDbsonl } <span class="k">from</span> <span class="s">'defuss-dbsonl'</span>;</code></pre>
+<pre><code></code></pre>
+<pre><code><span class="k">const</span> db = <span class="k">await</span> openDbsonl(createMemoryBackend(), <span class="s">'example'</span>, { create: <span class="k">true</span> });</code></pre>
+<pre><code><span class="k">const</span> snapshot = <span class="k">await</span> db.beginRead();</code></pre>
+<pre><code><span class="k">for await</span> (<span class="k">const</span> row <span class="k">of</span> snapshot.scan({ gte: <span class="s">'a'</span>, lt: <span class="s">'n'</span> })) console.log(row.key);</code></pre>
+<pre><code><span class="k">await</span> snapshot.close();</code></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="db-section" aria-labelledby="cta-title">
+    <div class="mk-cta db-cta">
+      <div class="shader" data-variant="background" data-effect="nebula" data-colors="#0f0a24 #4b2bb8 #b86e0c" data-speed="0.5" aria-hidden="true"></div>
+      <div class="mk-cta-inner">
+        <div class="mk-cta-copy">
+          <h2 class="mk-cta-title" id="cta-title">Read the protocol behind these guarantees</h2>
+          <p class="mk-cta-desc">ARCH.md documents the lock order, the crash cases and reclamation. The test suite runs them against real files, kernel locks, killed processes and browser workers.</p>
+        </div>
+        <div class="mk-cta-actions">
+          <a class="btn" data-size="lg" href="https://github.com/kyr0/defuss-dbjsonl" target="_blank" rel="noopener"><svg width="18" height="18" aria-hidden="true"><use href="#i-github"/></svg><span>View on GitHub</span></a>
+          <a class="btn" data-variant="outline" data-size="lg" href="https://github.com/kyr0/defuss-dbjsonl/blob/main/ARCH.md" target="_blank" rel="noopener">Read ARCH.md</a>
+        </div>
+        <p class="mk-cta-note">MIT license.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="mk-footer db-footer">
+  <div class="mk-footer-inner">
+    <nav class="mk-footer-nav db-footer-nav" aria-label="Footer">
+      <div class="mk-footer-col">
+        <h3 class="mk-footer-heading">Project</h3>
+        <ul class="mk-footer-list">
+          <li><a href="https://github.com/kyr0/defuss-dbjsonl">Source code</a></li>
+          <li><a href="https://github.com/kyr0/defuss-dbjsonl/blob/main/CHANGELOG.md">Changelog</a></li>
+          <li><a href="https://github.com/kyr0/defuss-dbjsonl/blob/main/ARCH.md">Architecture</a></li>
+        </ul>
+      </div>
+      <div class="mk-footer-col">
+        <h3 class="mk-footer-heading">Reference</h3>
+        <ul class="mk-footer-list">
+          <li><a href="https://github.com/kyr0/defuss-dbjsonl/blob/main/docs/API.md">API</a></li>
+          <li><a href="https://github.com/kyr0/defuss-dbjsonl/blob/main/docs/FORMAT.md">On-disk format</a></li>
+          <li><a href="https://github.com/kyr0/defuss-dbjsonl/blob/main/docs/PERFORMANCE.md">Performance evidence</a></li>
+        </ul>
+      </div>
+      <div class="mk-footer-col">
+        <h3 class="mk-footer-heading">Built on</h3>
+        <ul class="mk-footer-list">
+          <li><a href="https://dson.defuss.org">defuss-dson</a></li>
+          <li><a href="https://storage.defuss.org">defuss-storage</a></li>
+          <li><a href="https://shadcn.defuss.org">defuss-shadcn</a></li>
+          <li><a href="https://vae.defuss.org">defuss-vae</a></li>
+        </ul>
+      </div>
+      <div class="mk-footer-col">
+        <h3 class="mk-footer-heading">Professional services</h3>
+        <aside class="corner-leaf db-ad" aria-label="Consulting by Aron Homberg">
+          <div class="db-ad-head">
+            <div class="aura aura-glow aura-gold db-ad-portrait" style="--shape-round:1.5rem"><img class="shape-squircle" src="aron-homberg.jpg" width="400" height="400" loading="lazy" alt="Portrait of Aron Homberg"></div>
+            <div>
+              <p class="db-ad-name">Aron Homberg</p>
+              <p class="db-ad-role">Freelance AI and web tech expert</p>
+            </div>
+          </div>
+          <a class="btn" data-size="sm" href="https://www.linkedin.com/in/aronhomberg/" target="_blank" rel="noopener"><svg width="16" height="16" aria-hidden="true"><use href="#i-linkedin"/></svg><span>Connect on LinkedIn</span><svg width="14" height="14" aria-hidden="true"><use href="#i-external"/></svg></a>
+        </aside>
+      </div>
+    </nav>
+    <hr class="separator mk-footer-rule">
+    <div class="mk-footer-bottom">
+      <a href="#top" class="mk-footer-brand" aria-label="Back to the top"><svg class="db-brand-mark" aria-hidden="true"><use href="#i-logo"/></svg><span class="mk-footer-brand-name">defuss-dbsonl</span></a>
+      <div class="mk-footer-meta"><p class="mk-footer-copy">Copyright 2026 <a href="https://www.linkedin.com/in/aronhomberg/" target="_blank" rel="noopener">Aron Homberg (kyr0)</a>. Code under the MIT license.</p></div>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // The theme switch works without the demo bundle; the choice is remembered per browser when storage allows it.
+  (() => {
+    const toggle = document.getElementById('theme-toggle');
+    toggle.checked = document.documentElement.classList.contains('dark');
+    toggle.addEventListener('change', () => {
+      document.documentElement.classList.toggle('dark', toggle.checked);
+      document.documentElement.style.colorScheme = toggle.checked ? 'dark' : 'light';
+      try { localStorage.setItem('db-theme', toggle.checked ? 'dark' : 'light'); } catch {}
+    });
+  })();
+</script>
+</body>
+</html>

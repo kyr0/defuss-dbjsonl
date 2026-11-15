@@ -46,7 +46,7 @@
     "dist",
     "README.md",
     "ARCH.md",
-    "docs",
+    "docs/*.md",
     "LICENSE",
     "CHANGELOG.md",
     "examples"
@@ -61,7 +61,7 @@
   },
   "scripts": {
     "build": "pkgroll --clean-dist",
-    "lint": "tsc --noEmit && tsc -p tsconfig.tools.json && oxlint --deny-warnings src tests scripts examples",
+    "lint": "tsc --noEmit && tsc -p tsconfig.tools.json && oxlint --deny-warnings src tests scripts examples site",
     "test": "vitest run",
     "coverage": "vitest run --coverage",
     "e2e": "bun run build && bun scripts/e2e.ts",
