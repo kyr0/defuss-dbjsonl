@@ -52,3 +52,9 @@ Wrap: EVERY lead becomes a test | .vae/VERIFY.py rule | one MEMORY line with BC,
 2026-11-15T16:24:56Z s=afa01d3f FINDING scripts/bench.ts:baselines learn=none: Benchmark harness change; checksum mismatch throws before measuring, which is the mechanical guard.
 2026-11-15T16:31:44Z s=afa01d3f DONE fp=9a69bd6697f6 cov=97.9% paths=CHANGELOG.md,Makefile,README.md,docs/PERFORMANCE.md(+15)
 2026-11-15T16:31:44Z s=afa01d3f FINDING docs/PERFORMANCE.md:3 B01 learn=none: Root cause not established; no regression test before the cause is known (timing assertions are banned in correctness tests by tests/ARCH.md). Raised to the hum
+2026-11-15T17:13:42Z s=afa01d3f DONE fp=89cd6e38f4e4 cov=97.9% paths=docs/index.html
+2026-11-15T17:13:42Z s=afa01d3f FINDING docs/index.html:hero transfer.ts learn=none: Example copy checked against docs/API.md and the demo behavior covered by make e2e.
+2026-11-15T17:14:05Z s=afa01d3f DONE fp=8696f346acff cov=97.9% paths=docs/index.html
+2026-11-15T17:14:05Z s=afa01d3f FINDING docs/index.html:#stack learn=none: One-off link.
+2026-11-15T17:15:10Z s=afa01d3f DONE fp=5ea587c862f4 cov=97.9% paths=docs/PERFORMANCE.md,docs/index.html
+2026-11-15T17:15:10Z s=afa01d3f FINDING docs/index.html:#performance learn=none: Label copy; Node.js embeds V8 and Bun embeds JavaScriptCore.

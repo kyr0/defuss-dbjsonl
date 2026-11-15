@@ -4,7 +4,7 @@ VERIFIED: Every table compares builds under the same format, transactional API, 
 
 ## macOS arm64: v0.2, v0.3 and v0.4
 
-VERIFIED: Three consecutive runs of `make bench` under the pinned toolchain (`mise exec`) on an Apple M5 Max (18 logical CPUs), macOS 25.6.0, APFS, Node 24.22.1 and Bun 1.4.3, on 2026-11-15. The machine was busy, with a load average between 4.6 and 8.3. Each run takes the median of seven rounds after two warmups; the tables show the median of the three runs. Times are milliseconds per 1000 operations or rows; batch, compaction and reopen are per workload. All three raw reports are in `validation/bench-macos-arm64.json`.
+VERIFIED: Three consecutive runs of `make bench` under the pinned toolchain (`mise exec`) on an Apple M5 Max (18 logical CPUs), macOS 25.6.0, APFS, Node 24.22.1 (V8) and Bun 1.4.3 (JavaScriptCore), on 2026-11-15. The machine was busy, with a load average between 4.6 and 8.3. Each run takes the median of seven rounds after two warmups; the tables show the median of the three runs. Times are milliseconds per 1000 operations or rows; batch, compaction and reopen are per workload. All three raw reports are in `validation/bench-macos-arm64.json`.
 
 | Runtime | Workload | v0.2 ms | v0.3 ms | v0.4 ms | v0.4 vs v0.2 |
 | --- | --- | ---: | ---: | ---: | ---: |

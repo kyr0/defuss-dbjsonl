@@ -365,17 +365,19 @@
 <pre><code><span class="k">const</span> db = <span class="k">await</span> openDbsonl&lt;number&gt;(</code></pre>
 <pre><code>  <span class="k">await</span> createFileBackend(<span class="s">'./data'</span>), <span class="s">'accounts'</span>, { create: <span class="k">true</span> });</code></pre>
 <pre><code></code></pre>
-<pre><code><span class="k">const</span> before = <span class="k">await</span> db.beginRead();</code></pre>
+<pre><code><span class="k">const</span> before = <span class="k">await</span> db.beginRead(); <span class="c">// old state</span></code></pre>
 <pre><code><span class="k">await</span> db.transaction(<span class="k">async</span> tx =&gt; {</code></pre>
 <pre><code>  <span class="k">const</span> alice = (<span class="k">await</span> tx.get(<span class="s">'alice'</span>)).value!;</code></pre>
 <pre><code>  <span class="k">const</span> bob = (<span class="k">await</span> tx.get(<span class="s">'bob'</span>)).value!;</code></pre>
-<pre><code>  tx.put(<span class="s">'alice'</span>, alice - 20);</code></pre>
-<pre><code>  tx.put(<span class="s">'bob'</span>, bob + 20); <span class="c">// both or neither</span></code></pre>
-<pre><code>});</code></pre>
+<pre><code>  tx.put(<span class="s">'alice'</span>, alice - 20); <span class="c">// staged only</span></code></pre>
+<pre><code>  tx.put(<span class="s">'bob'</span>, bob + 20);</code></pre>
+<pre><code>}); <span class="c">// resolves once both are committed</span></code></pre>
+<pre><code></code></pre>
+<pre><code><span class="k">await</span> db.get(<span class="s">'alice'</span>); <span class="c">// new balance from here on</span></code></pre>
 <pre><code><span class="k">await</span> before.get(<span class="s">'alice'</span>); <span class="c">// still the old balance</span></code></pre>
 <pre><code><span class="k">await</span> before.close();</code></pre>
           </div>
-          <figcaption>The snapshot <code>before</code> keeps its root while the transaction commits.</figcaption>
+          <figcaption>Both writes become visible together when the awaited transaction resolves; the snapshot <code>before</code> keeps reading the old balances.</figcaption>
         </figure>
       </div>
     </div>
@@ -422,7 +424,7 @@
     <h2 class="db-h2 db-display" id="stack-title">The storage and API layer for defuss-dataview</h2>
     <p class="db-lead">defuss-dbsonl is designed as the backing store and API of <a class="db-link" href="https://dataview.defuss.org">defuss-dataview</a>. It turns the byte I/O of <a class="db-link" href="https://storage.defuss.org">defuss-storage</a> into a transactional key-value store and encodes every value with <a class="db-link" href="https://dson.defuss.org">defuss-dson</a>.</p>
     <figure class="db-stack" aria-label="Package layers from defuss-dataview down to the storage media">
-      <div class="db-layer" data-kind="app"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-grid"/></svg></span><div><strong>defuss-dataview</strong><span>Filters, sorting, paging and tree traversal for table and tree grids</span></div></div>
+      <div class="db-layer" data-kind="app"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-grid"/></svg></span><div><strong><a class="db-link" href="https://dataview.defuss.org">defuss-dataview</a></strong><span>Filters, sorting, paging and tree traversal for table and tree grids</span></div></div>
       <div class="db-layer" data-kind="self"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-tree"/></svg></span><div><strong>defuss-dbsonl <span class="badge" data-size="sm">this package</span></strong><span>Transactions, snapshots, the B+tree index, locks and compaction</span></div></div>
       <div class="db-layer-row">
         <div class="db-layer"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-frame"/></svg></span><div><strong><a class="db-link" href="https://dson.defuss.org">defuss-dson</a></strong><span>Typed JSON in frames with CRC32C checksums</span></div></div>
@@ -620,31 +622,31 @@
     <div class="db-section">
       <span class="mk-section-header-eyebrow">Benchmarks</span>
       <h2 class="db-h2 db-display" id="perf-title">What an operation costs</h2>
-      <p class="db-lead">defuss-dbsonl 0.4.0 with native asynchronous I/O on an Apple M5 Max under macOS, Node.js 24.22.1 and Bun 1.4.3. Each figure is the median of three runs; every run takes the median of seven rounds over 1000 records after two warmups and checks every returned value.</p>
+      <p class="db-lead">defuss-dbsonl 0.4.0 with native asynchronous I/O on an Apple M5 Max under macOS, Node.js 24.22.1 with V8 and Bun 1.4.3 with JavaScriptCore (JSC). Each figure is the median of three runs; every run takes the median of seven rounds over 1000 records after two warmups and checks every returned value.</p>
       <div class="db-stats">
         <div class="db-stat corner-leaf">
           <h3>Point read</h3><p class="db-stat-what"><code>get()</code>, head checked on every call</p>
-          <dl><div><dt>Node.js</dt><dd>31.1 µs</dd></div><div><dt>Bun</dt><dd>41.1 µs</dd></div></dl>
+          <dl><div><dt>Node.js (V8)</dt><dd>31.1 µs</dd></div><div><dt>Bun (JSC)</dt><dd>41.1 µs</dd></div></dl>
         </div>
         <div class="db-stat corner-leaf">
           <h3>Snapshot read</h3><p class="db-stat-what"><code>get()</code> on an open snapshot</p>
-          <dl><div><dt>Node.js</dt><dd>13.0 µs</dd></div><div><dt>Bun</dt><dd>17.4 µs</dd></div></dl>
+          <dl><div><dt>Node.js (V8)</dt><dd>13.0 µs</dd></div><div><dt>Bun (JSC)</dt><dd>17.4 µs</dd></div></dl>
         </div>
         <div class="db-stat corner-leaf">
           <h3>Scan</h3><p class="db-stat-what">per row, in key order</p>
-          <dl><div><dt>Node.js</dt><dd>5.6 µs</dd></div><div><dt>Bun</dt><dd>9.4 µs</dd></div></dl>
+          <dl><div><dt>Node.js (V8)</dt><dd>5.6 µs</dd></div><div><dt>Bun (JSC)</dt><dd>9.4 µs</dd></div></dl>
         </div>
         <div class="db-stat corner-leaf">
           <h3>Atomic batch</h3><p class="db-stat-what">1000 writes in one flushed commit</p>
-          <dl><div><dt>Node.js</dt><dd>18.7 ms</dd></div><div><dt>Bun</dt><dd>12.8 ms</dd></div></dl>
+          <dl><div><dt>Node.js (V8)</dt><dd>18.7 ms</dd></div><div><dt>Bun (JSC)</dt><dd>12.8 ms</dd></div></dl>
         </div>
         <div class="db-stat corner-leaf">
           <h3>Compaction</h3><p class="db-stat-what">1000 live records copied</p>
-          <dl><div><dt>Node.js</dt><dd>24.7 ms</dd></div><div><dt>Bun</dt><dd>19.4 ms</dd></div></dl>
+          <dl><div><dt>Node.js (V8)</dt><dd>24.7 ms</dd></div><div><dt>Bun (JSC)</dt><dd>19.4 ms</dd></div></dl>
         </div>
         <div class="db-stat corner-leaf">
           <h3>Reopen</h3><p class="db-stat-what">indexed open of an existing database</p>
-          <dl><div><dt>Node.js</dt><dd>0.52 ms</dd></div><div><dt>Bun</dt><dd>0.31 ms</dd></div></dl>
+          <dl><div><dt>Node.js (V8)</dt><dd>0.52 ms</dd></div><div><dt>Bun (JSC)</dt><dd>0.31 ms</dd></div></dl>
         </div>
       </div>
       <details class="db-details">
@@ -653,12 +655,12 @@
           <table class="table">
             <thead><tr><th scope="col">Runtime</th><th scope="col">Storage</th><th scope="col">Point read</th><th scope="col">Snapshot read</th><th scope="col">Scan</th><th scope="col">Batch</th><th scope="col">Compaction</th><th scope="col">Reopen</th></tr></thead>
             <tbody>
-                <tr><td>Node.js</td><td>native async</td><td>31.14</td><td>12.98</td><td>5.55</td><td>18.68</td><td>24.65</td><td>0.52</td></tr>
-                <tr><td>Node.js</td><td>native sync</td><td>13.85</td><td>5.17</td><td>3.76</td><td>17.60</td><td>23.00</td><td>0.42</td></tr>
-                <tr><td>Node.js</td><td>memory</td><td>11.21</td><td>4.81</td><td>4.34</td><td>9.18</td><td>10.98</td><td>0.03</td></tr>
-                <tr><td>Bun</td><td>native async</td><td>41.10</td><td>17.35</td><td>9.37</td><td>12.84</td><td>19.37</td><td>0.31</td></tr>
-                <tr><td>Bun</td><td>native sync</td><td>28.45</td><td>8.24</td><td>6.86</td><td>12.54</td><td>16.81</td><td>0.32</td></tr>
-                <tr><td>Bun</td><td>memory</td><td>23.50</td><td>7.56</td><td>6.76</td><td>10.03</td><td>13.26</td><td>0.03</td></tr>
+                <tr><td>Node.js (V8)</td><td>native async</td><td>31.14</td><td>12.98</td><td>5.55</td><td>18.68</td><td>24.65</td><td>0.52</td></tr>
+                <tr><td>Node.js (V8)</td><td>native sync</td><td>13.85</td><td>5.17</td><td>3.76</td><td>17.60</td><td>23.00</td><td>0.42</td></tr>
+                <tr><td>Node.js (V8)</td><td>memory</td><td>11.21</td><td>4.81</td><td>4.34</td><td>9.18</td><td>10.98</td><td>0.03</td></tr>
+                <tr><td>Bun (JSC)</td><td>native async</td><td>41.10</td><td>17.35</td><td>9.37</td><td>12.84</td><td>19.37</td><td>0.31</td></tr>
+                <tr><td>Bun (JSC)</td><td>native sync</td><td>28.45</td><td>8.24</td><td>6.86</td><td>12.54</td><td>16.81</td><td>0.32</td></tr>
+                <tr><td>Bun (JSC)</td><td>memory</td><td>23.50</td><td>7.56</td><td>6.76</td><td>10.03</td><td>13.26</td><td>0.03</td></tr>
             </tbody>
           </table>
         </div>
