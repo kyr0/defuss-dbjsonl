@@ -6,8 +6,6 @@ Agents append `<UTC ISO> s=<session> LESSON <VAE-DIALECT>` only for a falsified 
 Session start injects the 3 newest open entries: LESSON, FINDING learn=none, FAIL without a later DONE.
 Wrap: EVERY lead becomes a test | .vae/VERIFY.py rule | one MEMORY line with BC, then delete; OR delete BC evidence. -->
 
-2026-11-14T13:56:12Z s=afa01d3f DONE fp=3e7d757a42cd cov=98.3% paths=AGENTS.md,ARCH.md,CHANGELOG.md,Makefile(+82)
-2026-11-14T13:56:12Z s=afa01d3f FINDING src/core/store.ts:openDbsonl learn=test: tests/v2-recovery.test.ts 'an interrupted create is recoverable…' covers recovery, collect of the orphan and the fail-closed truncated-head case
 2026-11-14T13:56:12Z s=afa01d3f FINDING scripts/e2e.ts:69 learn=none: dev-harness fix; no proportionate mechanical check for every listen call
 2026-11-14T13:56:12Z s=afa01d3f FINDING scripts/check-architecture.ts:5 learn=verifier: make lint runs check-architecture on every gate
 2026-11-14T13:56:12Z s=afa01d3f FINDING .env.example learn=verifier: VAE gate checks env keys against .env.example
@@ -103,3 +101,8 @@ Wrap: EVERY lead becomes a test | .vae/VERIFY.py rule | one MEMORY line with BC,
 2026-11-16T19:03:10Z s=85830ead FINDING .vae/CLI_GIST.md learn=memory: CLI_GIST line 'redis probes'.
 2026-11-16T19:37:01Z s=85830ead DONE fp=43ef50f1b78a cov=97.7% paths=ARCH.md,CHANGELOG.md,Makefile,README.md(+28)
 2026-11-16T19:37:01Z s=85830ead FINDING package.json:version learn=none: Version bump only; no code path changed.
+2026-11-16T19:57:55Z s=a4ea8ca3 DONE fp=02e07bd46195 cov=98.4% paths=CHANGELOG.md,README.md,docs/PERFORMANCE.md,docs/index.html(+5)
+2026-11-16T19:57:55Z s=a4ea8ca3 FINDING README.md:17 (B evidence) learn=none: Prose evidence slip; not mechanically checkable.
+2026-11-16T19:57:55Z s=a4ea8ca3 FINDING docs/index.html: What you get, Guarantees, conflict demo, page-cache and several-writers cards (L logic) learn=none: Semantic doc drift; no deterministic rule distinguishes old from new wording.
+2026-11-16T19:57:55Z s=a4ea8ca3 FINDING tests/contracts.test.ts:coordinator test learn=test: The fixed test itself covers the cancelled native wait.
+2026-11-16T19:57:55Z s=a4ea8ca3 FINDING docs/PERFORMANCE.md macOS section (B evidence) learn=none: Prose evidence slip.

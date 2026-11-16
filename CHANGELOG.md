@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.1
+
+VERIFIED: `package.json` names the project website, https://dbsonl.defuss.org, as its homepage, and links the GitHub repository and issue tracker. The README explains installing from npm: on 2026-11-16, `bun add defuss-dbsonl@0.5.0` and `npm install defuss-dbsonl@0.5.0` each installed five packages in an empty project with no install script, and the `/server` entry stored and read a value under Node.js and Bun on macOS arm64.
+
+VERIFIED: The website describes 0.5.0: per-key transaction conflicts, commit groups, the second-chance page cache and the `make bench` figures of three runs on the 0.5.0 source. Against v0.3.0 in those runs no figure was slower in all three, and atomic batches took 1.6 times less time under Node.js and 2.4 times less under Bun. `docs/PERFORMANCE.md` has the tables; the 0.4.0 runs moved to `validation/bench-macos-arm64-0.4.0.json`.
+
+VERIFIED: `tests/contracts.test.ts` adds eight tests for documented contracts no other test reached. Coverage rose from 91.33% to 93.86% of statements, 86.17% to 90.15% of branches, 96.39% to 97.29% of functions and 97.67% to 98.41% of lines. No production code changed.
+
 ## 0.5.0
 
 VERIFIED: The website fits phones: code and tables scroll sideways instead of wrapping, tables tint every other row, cards put their icon beside the heading, and the install tabs stack. `make e2e` now also drives the website in WebKit at iPhone size, including the OPFS counter and the menu sheet, and fails if the page scrolls sideways.

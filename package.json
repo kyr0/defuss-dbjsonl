@@ -1,9 +1,17 @@
 {
   "name": "defuss-dbsonl",
-  "version": "0.5.0",
-  "description": "Transactional DSON storage with a persistent copy-on-write index, MVCC snapshots, compaction and process-safe coordination.",
+  "version": "0.5.1",
+  "description": "High performance transactional DSON storage with a persistent copy-on-write index, MVCC snapshots, compaction and process-safe coordination.",
   "license": "MIT",
   "author": "Aron Homberg",
+  "homepage": "https://dbsonl.defuss.org",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kyr0/defuss-dbjsonl.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kyr0/defuss-dbjsonl/issues"
+  },
   "type": "module",
   "packageManager": "bun@1.4.3",
   "sideEffects": false,

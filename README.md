@@ -1,17 +1,24 @@
-# defuss-dbsonl 0.5.0
+# defuss-dbsonl 0.5.1
 
-Transactional key-value storage for Node.js, Bun and browser workers. Values are DSON, so dates, binary views, bigint, `undefined` and cyclic references survive storage. It is built on [defuss-dson](https://dson.defuss.org) 1.4.0 and [defuss-storage](https://storage.defuss.org) 0.3.1 and ships TypeScript declarations with ESM and CommonJS builds. It is designed as the backing store and API of [defuss-dataview](https://dataview.defuss.org), which adds filters, sorting and paging for table and tree grids. Project website: [docs/index.html](docs/index.html).
+Transactional key-value storage for Node.js, Bun and browser workers. Values are DSON, so dates, binary views, bigint, `undefined` and cyclic references survive storage. It is built on [defuss-dson](https://dson.defuss.org) 1.4.0 and [defuss-storage](https://storage.defuss.org) 0.3.1 and ships TypeScript declarations with ESM and CommonJS builds. It is designed as the backing store and API of [defuss-dataview](https://dataview.defuss.org), which adds filters, sorting and paging for table and tree grids. Project website: [dbsonl.defuss.org](https://dbsonl.defuss.org).
 
 VERIFIED: A database is a persistent copy-on-write B+tree with immutable snapshots, atomic batches, optimistic serializable transactions, compaction and process-safe coordination. Opening reads two small manifest slots instead of replaying a log, and readers never block writers.
 
-## Install and use
+## Install
 
 ```sh
-make release
-bun add ./validation/defuss-dbsonl-0.5.0.tgz
+bun add defuss-dbsonl
+# or
+npm install defuss-dbsonl
 ```
 
-`make release` builds the tarball locally; registry publication is a separate step.
+The package is on the npm registry. It needs Node.js 20.19 or newer, Bun, or a dedicated browser worker with OPFS and Web Locks. `defuss-dson` and `defuss-storage` install with it.
+
+VERIFIED: The native lock addon, `@lickle/lock`, ships prebuilt binaries as optional dependencies for Linux x64 glibc, macOS x64 and arm64, and Windows x64, so nothing compiles during installation. On 2026-11-16, `bun add defuss-dbsonl@0.5.0` and `npm install defuss-dbsonl@0.5.0` in empty projects each installed five packages, none of which declares an install script, and the `/server` entry stored and read a value under both Node.js and Bun on macOS arm64.
+
+To install a local build instead, `make release` writes the tarball to `validation/`; add it with `bun add ./validation/defuss-dbsonl-<version>.tgz`.
+
+## Use
 
 ```ts
 import { openDbsonl } from 'defuss-dbsonl';
@@ -102,7 +109,7 @@ Resource budgets cap retained engine work. The page cache is bounded by encoded 
 
 ## Compatibility
 
-VERIFIED: Versions 0.2 through 0.4 share the on-disk format and the lock protocol. The packed-package suite runs 0.2.0 and the current build concurrently on Node and Bun against one database, so upgrading needs no migration.
+VERIFIED: Versions 0.2 through 0.5 share the on-disk format and the lock protocol. The packed-package suite runs 0.2.0 and the current build concurrently on Node and Bun against one database, so upgrading needs no migration.
 
 Version 0.4.0 renamed the native entry from `defuss-dbsonl/node` to `defuss-dbsonl/server` and removed the `/legacy` and `/records` subpaths. Data in the v0.1 log format must be migrated with defuss-dbsonl 0.3.x first; that release ships `defuss-dbsonl/legacy` and `examples/migrate.ts`. See [CHANGELOG.md](CHANGELOG.md).
 

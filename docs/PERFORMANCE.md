@@ -1,38 +1,40 @@
 # Performance evidence
 
-VERIFIED: Every table compares builds under the same format, transactional API, durability barriers, values and assertions. The macOS arm64 tables measure v0.2.0, v0.3.0 and v0.4.0 in the same runs. The Linux x64 tables come from an earlier run that measured v0.2.0 and a 0.3.0 build only; no Linux host was available for 0.4.0. The vendored 0.3.0 tarball is the build those Linux tables measured: its `dist` hashes match the recorded artifacts. The Redis section compares the current source with another store instead, under the pairings it states.
+VERIFIED: Every table compares builds under the same format, transactional API, durability barriers, values and assertions. The first macOS arm64 tables measure v0.2.0, v0.3.0 and v0.5.0 in the same runs; the 10000-record check measured v0.4.0 in an earlier session. The Linux x64 tables come from an earlier run that measured v0.2.0 and a 0.3.0 build only; no Linux host was available later. The vendored 0.3.0 tarball is the build those Linux tables measured: its `dist` hashes match the recorded artifacts. The Redis section compares the current source with another store instead, under the pairings it states.
 
-## macOS arm64: v0.2, v0.3 and v0.4
+## macOS arm64: v0.2, v0.3 and v0.5
 
-VERIFIED: Three consecutive runs of `make bench` under the pinned toolchain (`mise exec`) on an Apple M5 Max (18 logical CPUs), macOS 25.6.0, APFS, Node 24.22.1 (V8) and Bun 1.4.3 (JavaScriptCore), on 2026-11-15. The machine was busy, with a load average between 4.6 and 8.3. Each run takes the median of seven rounds after two warmups; the tables show the median of the three runs. Times are milliseconds per 1000 operations or rows; batch, compaction and reopen are per workload. All three raw reports are in `validation/bench-macos-arm64.json`.
+VERIFIED: Three consecutive runs of `make bench` under the pinned toolchain (`mise exec`) on an Apple M5 Max (18 logical CPUs), macOS 25.6.0, APFS, Node 24.22.1 (V8) and Bun 1.4.3 (JavaScriptCore), on 2026-11-16. The machine was busy: the 1-minute load average was 8.25 before the first run and 10.96 after the last. Each run takes the median of seven rounds after two warmups; the tables show the median of the three runs. Times are milliseconds per 1000 operations or rows; batch, compaction and reopen are per workload. All three raw reports are in `validation/bench-macos-arm64.json`.
 
-| Runtime | Workload | v0.2 ms | v0.3 ms | v0.4 ms | v0.4 vs v0.2 |
-| --- | --- | ---: | ---: | ---: | ---: |
-| Node | Fresh-root get | 445.39 | 30.07 | 31.14 | 14.31x |
-| Node | Pinned snapshot get | 132.79 | 13.53 | 12.98 | 10.23x |
-| Node | Snapshot scan | 129.26 | 4.99 | 5.55 | 23.29x |
-| Node | Atomic batch | 31.60 | 19.53 | 18.68 | 1.69x |
-| Node | Compaction | 177.95 | 24.76 | 24.65 | 7.22x |
-| Node | Indexed reopen | 0.48 | 0.47 | 0.52 | 0.93x |
-| Bun | Fresh-root get | 514.84 | 39.91 | 41.10 | 12.53x |
-| Bun | Pinned snapshot get | 155.19 | 15.89 | 17.35 | 8.94x |
-| Bun | Snapshot scan | 155.67 | 7.58 | 9.37 | 16.62x |
-| Bun | Atomic batch | 26.97 | 14.05 | 12.84 | 2.10x |
-| Bun | Compaction | 180.52 | 18.97 | 19.37 | 9.32x |
-| Bun | Indexed reopen | 0.38 | 0.34 | 0.31 | 1.24x |
+| Runtime | Workload | v0.2 ms | v0.3 ms | v0.5 ms | v0.5 vs v0.3 | v0.5 vs v0.2 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Node | Fresh-root get | 600.01 | 34.92 | 21.28 | 1.64x | 28.19x |
+| Node | Pinned snapshot get | 189.58 | 14.40 | 11.72 | 1.23x | 16.18x |
+| Node | Snapshot scan | 188.60 | 5.68 | 4.35 | 1.30x | 43.33x |
+| Node | Atomic batch | 36.49 | 20.60 | 12.72 | 1.62x | 2.87x |
+| Node | Compaction | 237.56 | 29.09 | 19.67 | 1.48x | 12.08x |
+| Node | Indexed reopen | 0.75 | 0.55 | 0.62 | 0.88x | 1.21x |
+| Bun | Fresh-root get | 515.68 | 44.51 | 44.38 | 1.00x | 11.62x |
+| Bun | Pinned snapshot get | 159.85 | 25.10 | 18.51 | 1.36x | 8.63x |
+| Bun | Snapshot scan | 168.86 | 10.02 | 6.70 | 1.50x | 25.22x |
+| Bun | Atomic batch | 32.24 | 16.22 | 6.67 | 2.43x | 4.83x |
+| Bun | Compaction | 183.75 | 20.18 | 10.71 | 1.88x | 17.16x |
+| Bun | Indexed reopen | 0.37 | 0.48 | 0.44 | 1.09x | 0.84x |
 
-| Runtime | Mode | v0.2 get ms | v0.3 get ms | v0.4 get ms |
+| Runtime | Mode | v0.2 get ms | v0.3 get ms | v0.5 get ms |
 | --- | --- | ---: | ---: | ---: |
-| Node | sync | 398.20 | 13.08 | 13.85 |
-| Node | memory | 21.66 | 12.09 | 11.21 |
-| Bun | sync | 436.05 | 24.07 | 28.45 |
-| Bun | memory | 27.86 | 21.15 | 23.50 |
+| Node | sync | 488.60 | 16.08 | 10.72 |
+| Node | memory | 24.00 | 13.63 | 9.77 |
+| Bun | sync | 485.93 | 24.24 | 19.14 |
+| Bun | memory | 38.07 | 23.14 | 21.06 |
 
-VERIFIED: On Node, v0.3 and v0.4 trade places from run to run with no consistent direction. On Bun, v0.4 was slower than v0.3 in all three runs for snapshot reads and scans on memory storage (20% to 26%), scans on native synchronous I/O (14% to 34%) and scans on native asynchronous I/O (12% to 28%). Both builds issue the same Storage reads.
+VERIFIED: No v0.5 figure was slower than v0.3 in all three runs. Reopen, a fraction of a millisecond, traded places from run to run, and so did Bun's fresh-root get on native asynchronous I/O and Node's on synchronous I/O. The largest gains are in batches and compaction.
 
-UNKNOWN: Why Bun runs these 0.4.0 read paths slower. Decoding moved into a shared `decodeRef` helper and the bundle layout changed when the legacy entries were removed; a Bun CPU profile of the memory snapshot-scan workload on both builds would locate the difference.
+VERIFIED: The 0.4.0 Bun slowdown on reads is gone in these runs. In the 2026-11-15 session, 0.4.0 ran Bun snapshot reads and scans on memory storage 20% to 26% slower than 0.3.0, and scans on native storage 12% to 34% slower. Here v0.5 is faster than v0.3 on each of those workloads: memory snapshot get 4.53 against 7.33 ms, memory scan 3.14 against 6.65 ms, native asynchronous scan 6.70 against 10.02 ms. The three 0.4.0 runs are kept in `validation/bench-macos-arm64-0.4.0.json`. Both sessions ran under different loads, so their milliseconds do not compare directly, and 0.4.0 has no column here.
 
-VERIFIED: The 10000-record check is one run of `make bench-scale` in the same session, native asynchronous I/O, two warmups and three measured rounds, in milliseconds per 10000 lookups. Raw measurements are in `validation/bench-scale-macos-arm64.json`.
+UNKNOWN: Why Bun ran those 0.4.0 read paths slower; the 0.5.0 runs no longer show it.
+
+VERIFIED: The 10000-record check is one run of `make bench-scale` in the 2026-11-15 session, which measured v0.4.0, native asynchronous I/O, two warmups and three measured rounds, in milliseconds per 10000 lookups. Raw measurements are in `validation/bench-scale-macos-arm64.json`.
 
 | Runtime | v0.2 get ms | v0.3 get ms | v0.4 get ms | v0.4 vs v0.2 |
 | --- | ---: | ---: | ---: | ---: |
