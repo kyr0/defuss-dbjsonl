@@ -7,16 +7,11 @@ Session start injects the 3 newest open entries: LESSON, FINDING learn=none, FAI
 Wrap: EVERY lead becomes a test | .vae/VERIFY.py rule | one MEMORY line with BC, then delete; OR delete BC evidence. -->
 
 2026-11-14T13:56:12Z s=afa01d3f FINDING scripts/e2e.ts:69 learn=none: dev-harness fix; no proportionate mechanical check for every listen call
-2026-11-14T13:56:12Z s=afa01d3f FINDING scripts/check-architecture.ts:5 learn=verifier: make lint runs check-architecture on every gate
-2026-11-14T13:56:12Z s=afa01d3f FINDING .env.example learn=verifier: VAE gate checks env keys against .env.example
 2026-11-14T13:56:12Z s=afa01d3f FINDING docs/LEGACY.md:13-28,45 learn=none: semantic doc drift; not mechanically checkable
 2026-11-14T13:56:12Z s=afa01d3f FINDING ARCH.md:37; docs/PERFORMANCE.md:55,83 learn=none: semantic scope
 2026-11-14T13:56:12Z s=afa01d3f FINDING docs/PERFORMANCE.md:3,81 learn=none: semantic evidence
 2026-11-14T13:56:12Z s=afa01d3f FINDING tests/browser/ARCH.md:7; scripts/ARCH.md:3,12; tests/ARCH.md; src/legacy/ARCH.md:19; docs/legacy/ARCH.md:3; docs/legacy/API.md:3 learn=none: semantic doc drift
-2026-11-14T14:32:48Z s=afa01d3f DONE fp=2119d9b29837 cov=97.9% paths=AGENTS.md,ARCH.md,CHANGELOG.md,Makefile(+52)
 2026-11-14T14:32:48Z s=afa01d3f FINDING scripts/bench.ts:38 learn=none: report-text correctness; no proportionate mechanical check
-2026-11-14T14:32:48Z s=afa01d3f FINDING scripts/e2e.ts:43 learn=test: make e2e fails if the baseline import is not rewritten
-2026-11-14T14:32:48Z s=afa01d3f FINDING README.md:99 learn=verifier: vae.py prose flags it
 2026-11-14T14:32:48Z s=afa01d3f FINDING src/core/io.ts:Appender.read learn=test: tests/mvcc.test.ts tree-growth and long-key budget tests load committed pages through Appender.read
 2026-11-15T14:41:31Z s=afa01d3f DONE fp=a5cc221cb1bb cov=97.9% paths=CHANGELOG.md,Makefile,README.md,docs/assets/demo.js(+11)
 2026-11-15T14:41:31Z s=afa01d3f FINDING site/demo.ts:conflicts learn=none: Demo-only control flow; forcing a memory put to fail needs a fault hook the public API does not offer, so no real-subsystem test can trigger it.
@@ -106,3 +101,8 @@ Wrap: EVERY lead becomes a test | .vae/VERIFY.py rule | one MEMORY line with BC,
 2026-11-16T19:57:55Z s=a4ea8ca3 FINDING docs/index.html: What you get, Guarantees, conflict demo, page-cache and several-writers cards (L logic) learn=none: Semantic doc drift; no deterministic rule distinguishes old from new wording.
 2026-11-16T19:57:55Z s=a4ea8ca3 FINDING tests/contracts.test.ts:coordinator test learn=test: The fixed test itself covers the cancelled native wait.
 2026-11-16T19:57:55Z s=a4ea8ca3 FINDING docs/PERFORMANCE.md macOS section (B evidence) learn=none: Prose evidence slip.
+2026-11-16T21:13:21Z s=a4ea8ca3 DONE fp=543003b319f9 cov=98.4% paths=CHANGELOG.md,README.md,docs/PERFORMANCE.md,docs/index.html(+8)
+2026-11-16T21:13:21Z s=a4ea8ca3 FINDING docs/index.html:dumbbell (chart mount) learn=test: scripts/e2e.ts asserts both chart descriptions in Chromium; the check failed on the previous markup per the probe.
+2026-11-16T21:13:21Z s=a4ea8ca3 FINDING docs/index.html:.db-vs-gauge learn=test: make e2e already fails on sideways scroll at iPhone size and now waits for both charts before measuring.
+2026-11-16T21:13:21Z s=a4ea8ca3 FINDING docs/index.html:Redis comparison script guard learn=none: A CDN outage is not reproducible in e2e without blocking the request; proportionate check would mock the network, which the project rules forbid.
+2026-11-16T21:13:21Z s=a4ea8ca3 FINDING docs/index.html:RUNS learn=none: Figures change only with a new benchmark run; a test pinning them would pin values that worked once.

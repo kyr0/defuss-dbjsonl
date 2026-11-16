@@ -133,6 +133,17 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('.shader canvas').length === 3, undefined, { timeout: 30000 });
   await page.click('#tab-browser');
   if (await page.isHidden('#use-browser')) throw new Error('Website install tabs did not switch.');
+  // The Redis comparison: ECharts, pinned and integrity-checked, draws both dumbbell charts; the gauges open on Bun
+  // flushed to disk and follow the runtime and storage switches, with one button of each group pressed.
+  await page.waitForFunction(() => document.querySelectorAll('#redis .chart svg').length === 2, undefined, { timeout: 30000 });
+  await page.waitForFunction(() => document.querySelector('#vs-contended .tacho-value')?.textContent === '18× faster');
+  for (const value of ['node', 'volatile', 'volatile']) await page.click(`#redis .toggle[data-value="${value}"]`);
+  await page.waitForFunction(() => document.querySelector('#vs-get .tacho-value')?.textContent === '3.6× faster' && document.querySelector('#vs-get-times')?.textContent === '12 µs against 42 µs');
+  const pressed = await page.$$eval('#redis .toggle[aria-pressed="true"]', toggles => toggles.map(toggle => (toggle as HTMLElement).dataset.value).join(' '));
+  if (pressed !== 'node volatile') throw new Error(`Website comparison switches show ${pressed} pressed.`);
+  // ECharts replaces a chart container's aria-label with a generated text unless the option passes the authored one.
+  const labels = await page.$$eval('#redis .chart', charts => charts.map(chart => chart.getAttribute('aria-label') ?? ''));
+  if (!labels.every(label => label.startsWith('Dumbbell chart of the time per operation'))) throw new Error(`Website chart descriptions were replaced: ${labels.join(' | ')}`);
   if (errors.length) throw new Error(`Website errors: ${errors.join('; ')}`);
   // Safari's engine at iPhone size: OPFS needs a persistent profile there, and the page must not scroll sideways.
   const profile = resolve('tmp/webkit-profile'); await rm(profile, { recursive: true, force: true });
@@ -155,17 +166,18 @@ try {
     await mobile.waitForSelector('#db-sheet', { state: 'hidden' });
     await mobile.tap('#types-run');
     await mobile.waitForFunction(() => document.querySelectorAll('#types-out tr[data-ok="true"]').length === 5);
+    await mobile.waitForFunction(() => document.querySelectorAll('#redis .chart svg').length === 2, undefined, { timeout: 30000 });
     const layout = await mobile.evaluate(() => ({ page: document.documentElement.scrollWidth, viewport: document.documentElement.clientWidth }));
     if (layout.page > layout.viewport) throw new Error(`Website scrolls sideways on a phone: ${layout.page} px content in a ${layout.viewport} px viewport.`);
     await mobile.screenshot({ path: resolve(output, 'site-iphone.png'), fullPage: true });
     if (mobileErrors.length) throw new Error(`Website errors in WebKit: ${mobileErrors.join('; ')}`);
-    Object.assign(result, { webkit: `${webkit.name()} ${phone.browser()?.version() ?? ''}`.trim(), phone: 'iPhone 15 viewport: OPFS add, delete, add; menu sheet; DSON demo; no sideways page scroll' });
+    Object.assign(result, { webkit: `${webkit.name()} ${phone.browser()?.version() ?? ''}`.trim(), phone: 'iPhone 15 viewport: OPFS add, delete, add; menu sheet; DSON demo; Redis charts; no sideways page scroll' });
   } finally { await phone.close(); }
   // The committed bundles must equal a fresh build from the packed package, or `make site` was skipped after a change.
   for (const file of ['demo.js', 'opfs.worker.js']) {
     if (!(await readFile(resolve(output, 'site/assets', file))).equals(await readFile(resolve('docs/assets', file)))) throw new Error(`docs/assets/${file} is stale; run make site.`);
   }
-  Object.assign(result, { website: 'snapshot, conflict, DSON and OPFS demos; reload persistence; delete then add; silent worker replaced; install tabs' });
+  Object.assign(result, { website: 'snapshot, conflict, DSON and OPFS demos; reload persistence; delete then add; silent worker replaced; install tabs; Redis gauges, switches and charts' });
   const report = { package: `defuss-dbsonl@${version}`, generatedAt: new Date().toISOString(), runtimes, v2, commonjs: ['Node', 'Bun'], declarations: 'no DOM or Node ambient types', browser: { name: 'Chromium', version: browser.version(), ...result } };
   await writeFile(resolve(output, 'e2e.json'), JSON.stringify(report, null, 2) + '\n');
   console.log(`Node, Bun, ESM, CommonJS, declaration checks, Chromium ${browser.version()} and WebKit at iPhone size passed.`);

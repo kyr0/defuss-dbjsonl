@@ -96,7 +96,9 @@
     .mk-hero-title em { font-style: normal; color: var(--primary); }
     .db-link { color: var(--primary); font-weight: 600; text-underline-offset: 3px; }
     .db-dson .text-rotate { vertical-align: bottom; }
-    .db-dson { font-size: clamp(1.2rem, 2vw, 1.45rem); font-weight: 500; line-height: 1.4; margin: 0.25rem 0 0.5rem; }
+    /* What DSON keeps and what defuss-dbsonl adds: two rotating lines that read as one pair. */
+    .db-pitch { display: grid; gap: 0.2rem; margin: 0.25rem 0 0.5rem; }
+    .db-dson { font-size: clamp(1.2rem, 2vw, 1.45rem); font-weight: 500; line-height: 1.4; margin: 0; }
     .db-rotate { color: var(--db-amber); font-weight: 600; }
     .db-footnote { font-size: 0.85rem; color: var(--muted-foreground); max-width: 34rem; }
     .db-hero .mk-hero-media, .db-hero .mk-hero-copy { min-width: 0; }
@@ -233,14 +235,31 @@
     .db-band { position: relative; isolation: isolate; padding-block: clamp(4rem, 8vw, 6rem); background: var(--muted); }
     .db-band-pattern { position: absolute; inset: 0; z-index: -1; --shape-ink: color-mix(in oklch, var(--foreground) 6%, transparent); --shape-pattern: 22px; }
     .db-scope { margin-top: 1rem; font-size: 0.9rem; color: var(--muted-foreground); max-width: 52rem; }
-    /* Redis comparison: one table, then the reasons behind its numbers. */
+    /* Redis comparison below the hero: headline figures, four gauges that follow the runtime and storage switches,
+       two dumbbell charts with all 16 pairings, then the tables. */
+    .db-vs-hits { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: 1rem; margin-top: 2rem; }
+    .db-vs-hit { display: grid; align-content: start; gap: 0.5rem; padding: 1.15rem 1.3rem; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); }
+    .db-vs-hit strong { font-size: clamp(2.3rem, 5vw, 3.2rem); line-height: 1; font-weight: 800; letter-spacing: -0.04em; color: var(--primary); font-variant-numeric: tabular-nums; }
+    .db-vs-hit[data-kind="loss"] strong { color: var(--db-amber); }
+    .db-vs-hit span { color: var(--muted-foreground); line-height: 1.45; }
+    .db-vs-panel { margin-top: 1rem; padding: clamp(1rem, 3vw, 1.75rem); background: var(--card); border: 1px solid var(--border); border-radius: calc(var(--radius) * 1.4); }
+    .db-vs-controls { display: flex; flex-wrap: wrap; gap: 0.75rem 1.5rem; }
+    .db-vs-control { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; font-size: 0.9rem; color: var(--muted-foreground); }
+    .db-vs-gauges { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr)); gap: 1.75rem 1rem; margin-top: 1.5rem; }
+    .db-vs-gauge { margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); justify-items: center; align-content: start; gap: 0.4rem; text-align: center; min-inline-size: 0; }
+    .db-vs-gauge .tacho { --tacho-size: 15rem; --tacho-optimum: var(--db-ok); --tacho-worst: var(--db-fail); }
+    .db-vs-gauge figcaption { display: grid; gap: 0.1rem; }
+    .db-vs-gauge figcaption strong { font-size: 1.05rem; }
+    .db-vs-gauge figcaption span { font-size: 0.9rem; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+    .db-vs-key { margin: 1.5rem 0 0; font-size: 0.9rem; color: var(--muted-foreground); max-width: 52rem; }
+    .db-vs-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr)); gap: 1rem; margin-top: 1rem; }
+    .db-vs-charts .chart-frame { min-inline-size: 0; margin: 0; }
+    .db-vs-chart { height: 27rem; }
+    .db-vs .db-details { margin-top: 1rem; }
     .db-h3 { margin: clamp(2.5rem, 5vw, 3.5rem) 0 0; font-size: clamp(1.35rem, 2.6vw, 1.75rem); line-height: 1.2; }
     .db-redis { margin-top: 1.25rem; background: var(--card); }
     .db-redis + .db-redis { margin-top: 0.9rem; }
     .db-redis th[scope="row"] { font-weight: 600; }
-    .db-points { list-style: none; margin: 1.25rem 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr)); gap: 0.9rem; }
-    .db-points li { padding: 1rem 1.15rem; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); color: var(--muted-foreground); line-height: 1.5; }
-    .db-points strong { display: block; margin-bottom: 0.25rem; color: var(--foreground); }
 
     .db-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 21rem), 1fr)); gap: 1.25rem; margin-top: 2rem; }
     .db-choice { display: flex; flex-direction: column; gap: 0.6rem; padding: 1.4rem 1.5rem; background: var(--card); border: 1px solid var(--border); border-radius: calc(var(--radius) * 1.4); }
@@ -303,6 +322,8 @@
   </style>
   <script type="module" src="https://cdn.jsdelivr.net/gh/kyr0/defuss-shadcn@v0.9.14/dist/components/all.js" integrity="sha384-Mq1xC+XFY/imVL24hx8azU48HFzatfOfXQgT7k9Y4MBZmRBG7TDiKCUcnwHGGzZa" crossorigin="anonymous"></script>
   <script type="module" src="https://cdn.jsdelivr.net/gh/kyr0/defuss-shadcn@v0.9.14/dist/components/shader/shader.js" integrity="sha384-ii/hVHqhXyczuS5j5KWW+JLr75Blxl1KcjczeHFoNEPJayV3UJh2ZA/hKZnGUZ/j" crossorigin="anonymous"></script>
+  <!-- ECharts is a classic deferred script; it runs before DOMContentLoaded, where the comparison mounts its charts. -->
+  <script defer src="https://cdn.jsdelivr.net/npm/echarts@6.1.0/dist/echarts.min.js" integrity="sha384-C2iskrW/uPW46KzOjrvJIQo4YkV8lkD+QS0CrDN18IIPIpT/g2USu8bTP3nvmIAD" crossorigin="anonymous"></script>
   <script type="module" src="assets/demo.js"></script>
 </head>
 <body>
@@ -347,6 +368,7 @@
     <a href="#top" class="mk-header-brand" aria-label="defuss-dbsonl home"><svg class="db-brand-mark" aria-hidden="true"><use href="#i-logo"/></svg><span class="mk-header-name">defuss-dbsonl</span></a>
     <nav class="mk-header-nav" aria-label="Main">
       <ul class="nav-menu-list">
+        <li class="nav-menu-item"><a class="nav-menu-link" href="#redis">vs Redis</a></li>
         <li class="nav-menu-item"><a class="nav-menu-link" href="#why">Why</a></li>
         <li class="nav-menu-item"><a class="nav-menu-link" href="#demo">Demo</a></li>
         <li class="nav-menu-item"><a class="nav-menu-link" href="#how">How it works</a></li>
@@ -371,6 +393,7 @@
     <div class="sheet-header"><h2 class="sheet-title" id="db-sheet-title">defuss-dbsonl</h2></div>
     <div class="sheet-body">
       <ul class="mk-header-sheet-nav">
+        <li><a data-sheet-close href="#redis">vs Redis</a></li>
         <li><a data-sheet-close href="#why">Why</a></li>
         <li><a data-sheet-close href="#demo">Demo</a></li>
         <li><a data-sheet-close href="#how">How it works</a></li>
@@ -393,7 +416,10 @@
         <a class="mk-hero-pill" href="#install"><span class="badge" data-size="sm">v0.5.1</span><span>MIT licensed, ESM and CommonJS, TypeScript declarations</span></a>
         <h1 class="mk-hero-title db-display" id="hero-title">Transactional key-value storage for <em>DSON</em></h1>
         <p class="mk-hero-desc">defuss-dbsonl runs on Node.js, Bun and in dedicated browser workers. Batches and transactions publish all of their changes or none, snapshots keep reading the state they opened on, and several processes or workers can share one database.</p>
-        <p class="db-dson"><a class="db-link" href="https://dson.defuss.org">DSON</a> is typed JSON that keeps <span class="text-rotate db-rotate" data-effect="fade" style="--text-rotate-duration:12s"><span><span>Map and Set</span><span>Date and RegExp</span><span>bigint</span><span>typed arrays</span><span>undefined and NaN</span><span>cyclic references</span></span></span></p>
+        <div class="db-pitch">
+          <p class="db-dson"><a class="db-link" href="https://dson.defuss.org">DSON</a> is typed JSON that keeps <span class="text-rotate db-rotate" data-effect="fade" style="--text-rotate-duration:12s"><span><span>Map and Set</span><span>Date and RegExp</span><span>bigint</span><span>typed arrays</span><span>undefined and NaN</span><span>cyclic references</span></span></span></p>
+          <p class="db-dson"><a class="db-link" href="#why">defuss-dbsonl</a> adds <span class="text-rotate db-rotate" data-effect="fade" style="--text-rotate-duration:15s"><span><span>atomic batches</span><span>serializable transactions</span><span>non-blocking snapshots</span><span>multi-process writes</span><span>per-key conflict checks</span><span>explicit compaction</span></span></span></p>
+        </div>
         <div class="mk-hero-actions">
           <span class="aura aura-glow"><a class="btn" data-size="lg" href="#demo"><span>Try it in this tab<sup aria-hidden="true">*</sup></span><svg width="18" height="18" aria-hidden="true"><use href="#i-arrow"/></svg></a></span>
           <a class="btn" data-variant="outline" data-size="lg" href="https://github.com/kyr0/defuss-dbjsonl/blob/main/docs/API.md">Read the API</a>
@@ -426,6 +452,106 @@
         </figure>
       </div>
     </div>
+  </section>
+
+  <section class="db-section db-vs" id="redis" aria-labelledby="vs-title">
+    <span class="mk-section-header-eyebrow">defuss-dbsonl against Redis 8.10</span>
+    <h2 class="db-h2 db-display" id="vs-title">Faster than Redis in 12 of 16 pairings</h2>
+    <p class="db-lead">Four workloads, each on Node.js and on Bun, flushed to disk and in memory. defuss-dbsonl runs in the measuring process; Redis 8.10.3 answers over loopback TCP through the node-redis client. A Redis transaction is <code>WATCH</code>, <code>MULTI</code> and <code>EXEC</code>; a defuss-dbsonl transaction is <code>transaction()</code>.</p>
+    <div class="db-vs-hits">
+      <div class="db-vs-hit"><strong>12 of 16</strong><span>pairings in which defuss-dbsonl took less time than Redis; 0.4.0 did in 4</span></div>
+      <div class="db-vs-hit"><strong>18×</strong><span>faster with four writers committing to disk on Bun: 0.17 ms against 3.0 ms per commit</span></div>
+      <div class="db-vs-hit"><strong>3.6×</strong><span>faster point reads in memory on Node.js: 12 µs against 42 µs</span></div>
+      <div class="db-vs-hit" data-kind="loss"><strong>4 of 16</strong><span>went to Redis, by up to 2.2×: a lone writer flushing to disk on Node.js, and atomic batches except on disk under Bun</span></div>
+    </div>
+
+    <div class="db-vs-panel">
+      <div class="db-vs-controls">
+        <div class="db-vs-control"><span id="vs-runtime-label">Runtime</span>
+          <div class="toggle-group" data-variant="outline" role="group" aria-labelledby="vs-runtime-label" data-key="runtime">
+            <button class="toggle" type="button" aria-pressed="false" data-value="node">Node.js</button>
+            <button class="toggle" type="button" aria-pressed="true" data-value="bun">Bun</button>
+          </div>
+        </div>
+        <div class="db-vs-control"><span id="vs-mode-label">Storage</span>
+          <div class="toggle-group" data-variant="outline" role="group" aria-labelledby="vs-mode-label" data-key="mode">
+            <button class="toggle" type="button" aria-pressed="true" data-value="durable">Flushed to disk</button>
+            <button class="toggle" type="button" aria-pressed="false" data-value="volatile">In memory</button>
+          </div>
+        </div>
+      </div>
+      <div class="db-vs-gauges">
+        <figure class="db-vs-gauge">
+          <div class="tacho" id="vs-get" data-sweep="240" data-ticks="1" data-format="vs-redis">
+            <meter class="tacho-meter" min="-2" max="5" low="0" high="0" optimum="5" value="0.274" aria-label="Point read, defuss-dbsonl against Redis">1.2 times faster</meter>
+            <output class="tacho-value"></output>
+          </div>
+          <figcaption><strong>Point read</strong><span id="vs-get-times">32 µs against 39 µs</span></figcaption>
+        </figure>
+        <figure class="db-vs-gauge">
+          <div class="tacho" id="vs-transaction" data-sweep="240" data-ticks="1" data-format="vs-redis">
+            <meter class="tacho-meter" min="-2" max="5" low="0" high="0" optimum="5" value="3.145" aria-label="Transaction, defuss-dbsonl against Redis">8.8 times faster</meter>
+            <output class="tacho-value"></output>
+          </div>
+          <figcaption><strong>Transaction</strong><span id="vs-transaction-times">428 µs against 3.8 ms</span></figcaption>
+        </figure>
+        <figure class="db-vs-gauge">
+          <div class="tacho" id="vs-contended" data-sweep="240" data-ticks="1" data-format="vs-redis">
+            <meter class="tacho-meter" min="-2" max="5" low="0" high="0" optimum="5" value="4.186" aria-label="Four writers at once, defuss-dbsonl against Redis">18 times faster</meter>
+            <output class="tacho-value"></output>
+          </div>
+          <figcaption><strong>Four writers at once</strong><span id="vs-contended-times">166 µs against 3.0 ms</span></figcaption>
+        </figure>
+        <figure class="db-vs-gauge">
+          <div class="tacho" id="vs-batch" data-sweep="240" data-ticks="1" data-format="vs-redis">
+            <meter class="tacho-meter" min="-2" max="5" low="0" high="0" optimum="5" value="0.984" aria-label="Batch of 1000 writes, defuss-dbsonl against Redis">2.0 times faster</meter>
+            <output class="tacho-value"></output>
+          </div>
+          <figcaption><strong>Batch of 1000 writes</strong><span id="vs-batch-times">2.7 ms against 5.3 ms</span></figcaption>
+        </figure>
+      </div>
+      <p class="db-vs-key">Right of 1× defuss-dbsonl was faster; each step on the scale doubles. Times are defuss-dbsonl's, then Redis's.</p>
+    </div>
+
+    <div class="db-vs-charts">
+      <figure class="chart-frame">
+        <h3 class="chart-title">Flushed to disk</h3>
+        <p class="chart-dek">Durable commits against Redis with <code>appendfsync always</code>. The line spans the gap between the two engines; the scale is logarithmic.</p>
+        <div id="vs-chart-durable" class="chart db-vs-chart" role="img" aria-label="Dumbbell chart of the time per operation flushed to disk. defuss-dbsonl took less time in 6 of 8 pairings, up to 18 times less with four writers on Bun; Redis took less time for a lone Node.js transaction and a Node.js batch, about 2 times less."></div>
+      </figure>
+      <figure class="chart-frame">
+        <h3 class="chart-title">In memory</h3>
+        <p class="chart-dek">The memory backend against Redis without persistence. Same scale, so the two charts compare.</p>
+        <div id="vs-chart-volatile" class="chart db-vs-chart" role="img" aria-label="Dumbbell chart of the time per operation in memory. defuss-dbsonl took less time for every read and transaction, 1.2 to 3.6 times less; Redis took less time for both batches, 1.6 and 2.2 times less."></div>
+      </figure>
+    </div>
+
+    <details class="db-details">
+      <summary>All 16 pairings as tables</summary>
+      <div class="table-container db-redis">
+        <table class="table">
+          <thead><tr class="table-row"><th class="table-head" scope="col">Durable, per operation</th><th class="table-head" scope="col" data-numeric>dbsonl, Node.js</th><th class="table-head" scope="col" data-numeric>Redis, Node.js client</th><th class="table-head" scope="col" data-numeric>dbsonl, Bun</th><th class="table-head" scope="col" data-numeric>Redis, Bun client</th></tr></thead>
+          <tbody>
+            <tr class="table-row"><th class="table-cell" scope="row">Point read</th><td class="table-cell" data-numeric>27 µs</td><td class="table-cell" data-numeric>47 µs</td><td class="table-cell" data-numeric>32 µs</td><td class="table-cell" data-numeric>39 µs</td></tr>
+            <tr class="table-row"><th class="table-cell" scope="row">Transaction, read 2 keys and write 2</th><td class="table-cell" data-numeric>7.6 ms</td><td class="table-cell" data-numeric>3.8 ms</td><td class="table-cell" data-numeric>0.43 ms</td><td class="table-cell" data-numeric>3.8 ms</td></tr>
+            <tr class="table-row"><th class="table-cell" scope="row">Same, 4 writers at once, per commit</th><td class="table-cell" data-numeric>1.9 ms</td><td class="table-cell" data-numeric>3.0 ms</td><td class="table-cell" data-numeric>0.17 ms</td><td class="table-cell" data-numeric>3.0 ms</td></tr>
+            <tr class="table-row"><th class="table-cell" scope="row">Atomic batch of 1000 writes</th><td class="table-cell" data-numeric>13.4 ms</td><td class="table-cell" data-numeric>6.6 ms</td><td class="table-cell" data-numeric>2.7 ms</td><td class="table-cell" data-numeric>5.3 ms</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="table-container db-redis">
+        <table class="table">
+          <thead><tr class="table-row"><th class="table-head" scope="col">In memory, per operation</th><th class="table-head" scope="col" data-numeric>dbsonl, Node.js</th><th class="table-head" scope="col" data-numeric>Redis, Node.js client</th><th class="table-head" scope="col" data-numeric>dbsonl, Bun</th><th class="table-head" scope="col" data-numeric>Redis, Bun client</th></tr></thead>
+          <tbody>
+            <tr class="table-row"><th class="table-cell" scope="row">Point read</th><td class="table-cell" data-numeric>12 µs</td><td class="table-cell" data-numeric>42 µs</td><td class="table-cell" data-numeric>20 µs</td><td class="table-cell" data-numeric>44 µs</td></tr>
+            <tr class="table-row"><th class="table-cell" scope="row">Transaction, read 2 keys and write 2</th><td class="table-cell" data-numeric>0.082 ms</td><td class="table-cell" data-numeric>0.16 ms</td><td class="table-cell" data-numeric>0.093 ms</td><td class="table-cell" data-numeric>0.21 ms</td></tr>
+            <tr class="table-row"><th class="table-cell" scope="row">Same, 4 writers at once, per commit</th><td class="table-cell" data-numeric>0.063 ms</td><td class="table-cell" data-numeric>0.076 ms</td><td class="table-cell" data-numeric>0.069 ms</td><td class="table-cell" data-numeric>0.084 ms</td></tr>
+            <tr class="table-row"><th class="table-cell" scope="row">Atomic batch of 1000 writes</th><td class="table-cell" data-numeric>5.4 ms</td><td class="table-cell" data-numeric>2.5 ms</td><td class="table-cell" data-numeric>2.2 ms</td><td class="table-cell" data-numeric>1.4 ms</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </details>
+    <p class="db-scope">Median of three <code>make bench-redis</code> runs on an Apple M5 Max with Node.js 24.22.1 and Bun 1.4.3, each the median of seven rounds over 1000 records, under a load average of 5.5 to 10.9. <a href="https://github.com/kyr0/defuss-dbjsonl/blob/main/validation/bench-redis-macos-arm64.json">Raw samples</a>.</p>
   </section>
 
   <section class="db-section" id="why" aria-labelledby="why-title">
@@ -713,37 +839,7 @@
       </details>
       <p class="db-scope">Against v0.3.0 in the same three runs, no figure was slower in all of them, and atomic batches took 1.6 times less time on Node.js and 2.4 times less on Bun. Measured under load: other work kept the machine busy through all three runs (load average 8.3 to 11.0), so every figure includes contention for CPU and I/O. The file cache was warm; cold-disk latency was not measured. Raw samples are in <a href="https://github.com/kyr0/defuss-dbjsonl/blob/main/validation/bench-macos-arm64.json">validation/bench-macos-arm64.json</a>, and <code>make bench</code> repeats the run on your machine.</p>
 
-      <h3 class="db-h3 db-display" id="redis">Compared with Redis transactions</h3>
-      <p class="db-lead">One process per runtime ran each workload on defuss-dbsonl and on Redis 8.10.3 over loopback TCP with the node-redis client. Redis transactions use <code>WATCH</code>, <code>MULTI</code> and <code>EXEC</code>; defuss-dbsonl uses <code>transaction()</code>. Durable pairs a flushed file commit with Redis <code>appendfsync always</code>; memory pairs the memory backend with Redis without persistence.</p>
-      <div class="table-container db-redis">
-        <table class="table">
-          <thead><tr class="table-row"><th class="table-head" scope="col">Durable, per operation</th><th class="table-head" scope="col" data-numeric>dbsonl, Node.js</th><th class="table-head" scope="col" data-numeric>Redis, Node.js client</th><th class="table-head" scope="col" data-numeric>dbsonl, Bun</th><th class="table-head" scope="col" data-numeric>Redis, Bun client</th></tr></thead>
-          <tbody>
-            <tr class="table-row"><th class="table-cell" scope="row">Point read</th><td class="table-cell" data-numeric>27 µs</td><td class="table-cell" data-numeric>47 µs</td><td class="table-cell" data-numeric>32 µs</td><td class="table-cell" data-numeric>39 µs</td></tr>
-            <tr class="table-row"><th class="table-cell" scope="row">Transaction, read 2 keys and write 2</th><td class="table-cell" data-numeric>7.6 ms</td><td class="table-cell" data-numeric>3.8 ms</td><td class="table-cell" data-numeric>0.43 ms</td><td class="table-cell" data-numeric>3.8 ms</td></tr>
-            <tr class="table-row"><th class="table-cell" scope="row">Same, 4 writers at once, per commit</th><td class="table-cell" data-numeric>1.9 ms</td><td class="table-cell" data-numeric>3.0 ms</td><td class="table-cell" data-numeric>0.17 ms</td><td class="table-cell" data-numeric>3.0 ms</td></tr>
-            <tr class="table-row"><th class="table-cell" scope="row">Atomic batch of 1000 writes</th><td class="table-cell" data-numeric>13.4 ms</td><td class="table-cell" data-numeric>6.6 ms</td><td class="table-cell" data-numeric>2.7 ms</td><td class="table-cell" data-numeric>5.3 ms</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="table-container db-redis">
-        <table class="table">
-          <thead><tr class="table-row"><th class="table-head" scope="col">In memory, per operation</th><th class="table-head" scope="col" data-numeric>dbsonl, Node.js</th><th class="table-head" scope="col" data-numeric>Redis, Node.js client</th><th class="table-head" scope="col" data-numeric>dbsonl, Bun</th><th class="table-head" scope="col" data-numeric>Redis, Bun client</th></tr></thead>
-          <tbody>
-            <tr class="table-row"><th class="table-cell" scope="row">Point read</th><td class="table-cell" data-numeric>12 µs</td><td class="table-cell" data-numeric>42 µs</td><td class="table-cell" data-numeric>20 µs</td><td class="table-cell" data-numeric>44 µs</td></tr>
-            <tr class="table-row"><th class="table-cell" scope="row">Transaction, read 2 keys and write 2</th><td class="table-cell" data-numeric>0.082 ms</td><td class="table-cell" data-numeric>0.16 ms</td><td class="table-cell" data-numeric>0.093 ms</td><td class="table-cell" data-numeric>0.21 ms</td></tr>
-            <tr class="table-row"><th class="table-cell" scope="row">Same, 4 writers at once, per commit</th><td class="table-cell" data-numeric>0.063 ms</td><td class="table-cell" data-numeric>0.076 ms</td><td class="table-cell" data-numeric>0.069 ms</td><td class="table-cell" data-numeric>0.084 ms</td></tr>
-            <tr class="table-row"><th class="table-cell" scope="row">Atomic batch of 1000 writes</th><td class="table-cell" data-numeric>5.4 ms</td><td class="table-cell" data-numeric>2.5 ms</td><td class="table-cell" data-numeric>2.2 ms</td><td class="table-cell" data-numeric>1.4 ms</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <ul class="db-points">
-        <li><strong>Faster in 12 of 16 pairings.</strong> Every read, every transaction in memory, every run of four writers and every Bun write on disk take less time than Redis. defuss-dbsonl 0.4.0 led in 4.</li>
-        <li><strong>A lone durable writer on Node.js loses to flushes.</strong> A commit flushes the data file and then the head slot; Redis flushes once per <code>EXEC</code>. A flush took about 3 ms under Node.js on this Mac and 0.04 ms under Bun. Four writers share both flushes in one commit group and take 0.65 of Redis's time.</li>
-        <li><strong>Concurrent writers share a commit.</strong> A forming group waits briefly for transactions that already hold a snapshot, and a transaction rechecks only the keys it read, so the four writers committed together without a single retry; under 0.4.0 they retried up to 2.9 times per commit.</li>
-        <li><strong>Batches in memory pay for encoding.</strong> Every value is its own checksummed DSON frame; in a profile that is about half of a batch's time, while the Redis client serializes with the built-in <code>JSON.stringify</code>.</li>
-      </ul>
-      <p class="db-scope">Median of three runs of <code>make bench-redis</code> on the 0.5.0 source with defuss-dson 1.4.0 and defuss-storage 0.3.1, each the median of seven rounds over 1000 records after two warmups; the load average ranged from 5.5 to 10.9, and each engine's turn started after a full garbage collection. Raw samples are in <a href="https://github.com/kyr0/defuss-dbjsonl/blob/main/validation/bench-redis-macos-arm64.json">validation/bench-redis-macos-arm64.json</a>; the 0.4.0 runs are in <a href="https://github.com/kyr0/defuss-dbjsonl/blob/main/validation/bench-redis-macos-arm64-baseline.json">bench-redis-macos-arm64-baseline.json</a>.</p>
+      <p class="db-scope">The comparison with Redis is <a href="#redis">below the introduction</a>.</p>
     </div>
     <div class="edge-wave-bottom" aria-hidden="true"></div>
   </section>
@@ -912,6 +1008,109 @@
   </div>
 </footer>
 
+<script>
+  // The Redis comparison. Without the component runtime or ECharts the meters and the tables still show the figures.
+  document.addEventListener('DOMContentLoaded', () => {
+    const ui = window.df$?.shadcn;
+    if (!ui?.tacho) return;
+    // Medians of three runs of make bench-redis, as in docs/PERFORMANCE.md: [defuss-dbsonl, Redis] in ms per 1000
+    // operations. A batch is one commit of 1000 writes, so its figure is the time of one batch.
+    const RUNS = {
+      node: {
+        durable: { get: [27.30, 47.25], transaction: [7572.99, 3823.43], contended: [1945.98, 2994.13], batch: [13.44, 6.55] },
+        volatile: { get: [11.68, 42.18], transaction: [82.15, 155.37], contended: [63.33, 76.39], batch: [5.37, 2.46] },
+      },
+      bun: {
+        durable: { get: [32.45, 39.24], transaction: [427.50, 3780.74], contended: [165.85, 3018.68], batch: [2.70, 5.34] },
+        volatile: { get: [20.05, 44.14], transaction: [93.13, 206.50], contended: [68.64, 84.00], batch: [2.25, 1.39] },
+      },
+    };
+    const WORKLOADS = { get: 'Point read', transaction: 'Transaction', contended: '4 writers', batch: 'Batch of 1000' };
+    const RUNTIMES = { node: 'Node.js', bun: 'Bun' };
+    const micros = (key, ms) => key === 'batch' ? ms * 1000 : ms;
+    const time = us => us < 1000 ? `${Math.round(us)} µs` : `${(us / 1000).toFixed(1)} ms`;
+    const one = number => number.toFixed(number < 10 ? 1 : 0);
+    const verdict = ratio => ratio >= 1 ? `${one(ratio)}× faster` : `${one(1 / ratio)}× slower`;
+    const tick = power => power < 0 ? (power === -1 ? '½×' : '¼×') : `${2 ** power}×`;
+    // The gauges show log2(Redis time / defuss-dbsonl time): 0 is a tie, and every step doubles.
+    ui.tacho.format('vs-redis', (value, context) => context.tick ? tick(Math.round(value)) : verdict(2 ** value));
+
+    const choice = { runtime: 'bun', mode: 'durable' };
+    const show = () => {
+      for (const [key, [db, redis]] of Object.entries(RUNS[choice.runtime][choice.mode])) {
+        ui.tacho.value(`#vs-${key}`, Math.log2(redis / db));
+        document.getElementById(`vs-${key}-times`).textContent = `${time(micros(key, db))} against ${time(micros(key, redis))}`;
+      }
+    };
+    // A document listener runs after the toggle group's own, so exactly one button of each group stays pressed.
+    document.addEventListener('click', event => {
+      const pick = event.target.closest?.('.db-vs-controls .toggle');
+      if (!pick) return;
+      const group = pick.closest('.toggle-group');
+      for (const toggle of group.querySelectorAll('.toggle')) toggle.setAttribute('aria-pressed', String(toggle === pick));
+      choice[group.dataset.key] = pick.dataset.value;
+      show();
+    });
+    show();
+    if (!ui.chart || !window.echarts) return;
+
+    const dumbbell = (el, mode) => {
+      const rows = Object.keys(WORKLOADS).flatMap(key => Object.keys(RUNTIMES).map(runtime => {
+        const [db, redis] = RUNS[runtime][mode][key];
+        return { label: `{w|${WORKLOADS[key]}}\n{r|${RUNTIMES[runtime]}}`, title: `${WORKLOADS[key]}, ${RUNTIMES[runtime]}`, db: micros(key, db), redis: micros(key, redis), ratio: redis / db };
+      }));
+      const scale = us => us < 1000 ? `${us} µs` : `${us / 1000} ms`;
+      // ECharts writes a generated description over the container's aria-label; it gets the authored one instead.
+      const description = el.getAttribute('aria-label');
+      ui.chart.mount(el, {
+        baseOption: {
+          aria: { enabled: true, label: { description } },
+          legend: { right: 0, data: ['defuss-dbsonl', 'Redis'] },
+          grid: { left: 4, right: 86, top: 40, bottom: 8, containLabel: true },
+          tooltip: {
+            trigger: 'axis', axisPointer: { type: 'shadow' },
+            formatter: items => { const row = rows[items[0].dataIndex]; return `<strong>${row.title}</strong><br>defuss-dbsonl: ${time(row.db)}<br>Redis: ${time(row.redis)}<br>${verdict(row.ratio)}`; },
+          },
+          xAxis: { type: 'log', min: 10, max: 20000, axisLabel: { formatter: scale } },
+          yAxis: {
+            type: 'category', inverse: true, data: rows.map(row => row.label), axisLine: { show: false },
+            axisLabel: { lineHeight: 17, rich: { w: { color: 'var(--foreground)', fontWeight: 600, fontSize: 13 }, r: { color: 'var(--muted-foreground)', fontSize: 12 } } },
+          },
+          series: [
+            {
+              // The connector: a line between the two engines, green where defuss-dbsonl took less time.
+              type: 'custom', silent: true, tooltip: { show: false }, encode: { x: [0, 1], y: 2 },
+              data: rows.map((row, index) => [Math.min(row.db, row.redis), Math.max(row.db, row.redis), index, row.ratio >= 1 ? 1 : 0]),
+              renderItem: (_params, api) => {
+                const [x1, y] = api.coord([api.value(0), api.value(2)]), [x2] = api.coord([api.value(1), api.value(2)]);
+                return { type: 'line', shape: { x1, y1: y, x2, y2: y }, style: { stroke: ui.chart.color(el, api.value(3) ? '--db-ok' : '--db-fail', 0.5), lineWidth: 5, lineCap: 'round' } };
+              },
+            },
+            { name: 'Redis', type: 'scatter', symbolSize: 14, z: 3, data: rows.map(row => row.redis), itemStyle: { opacity: 1, color: 'var(--card)', borderColor: 'var(--muted-foreground)', borderWidth: 2.5 } },
+            { name: 'defuss-dbsonl', type: 'scatter', symbolSize: 14, z: 4, data: rows.map(row => row.db), itemStyle: { opacity: 1, color: 'var(--primary)' } },
+            {
+              // The verdict, right of whichever engine took longer.
+              type: 'scatter', symbolSize: 0, silent: true, tooltip: { show: false },
+              label: { show: true, position: 'right', distance: 12, fontWeight: 700, formatter: ({ dataIndex }) => verdict(rows[dataIndex].ratio) },
+              data: rows.map(row => ({ value: Math.max(row.db, row.redis), label: { color: row.ratio >= 1 ? 'var(--db-ok)' : 'var(--db-fail)' } })),
+            },
+          ],
+        },
+        // A phone-width chart keeps every other decade on the axis and smaller verdicts, so the plot keeps its width.
+        media: [{
+          query: { maxWidth: 440 },
+          option: {
+            grid: { right: 66 },
+            xAxis: { axisLabel: { formatter: us => us === 10 || us === 1000 ? scale(us) : '' } },
+            series: [{}, {}, {}, { label: { fontSize: 11, distance: 8 } }],
+          },
+        }],
+      });
+    };
+    dumbbell(document.getElementById('vs-chart-durable'), 'durable');
+    dumbbell(document.getElementById('vs-chart-volatile'), 'volatile');
+  });
+</script>
 <script>
   // The theme switch works without the demo bundle; the choice is remembered per browser when storage allows it.
   (() => {

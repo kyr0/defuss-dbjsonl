@@ -6,6 +6,8 @@ VERIFIED: `package.json` names the project website, https://dbsonl.defuss.org, a
 
 VERIFIED: The website describes 0.5.0: per-key transaction conflicts, commit groups, the second-chance page cache and the `make bench` figures of three runs on the 0.5.0 source. Against v0.3.0 in those runs no figure was slower in all three, and atomic batches took 1.6 times less time under Node.js and 2.4 times less under Bun. `docs/PERFORMANCE.md` has the tables; the 0.4.0 runs moved to `validation/bench-macos-arm64-0.4.0.json`.
 
+VERIFIED: Below the hero, the website compares defuss-dbsonl with Redis 8.10.3 in the 16 pairings of `make bench-redis`. It shows the headline figures, four gauges that follow a runtime and storage switch, opening on Bun flushed to disk, and two dumbbell charts drawn with ECharts 6.1.0. The tables moved into that section. Under the DSON line, the hero has a second rotating line listing what defuss-dbsonl adds. `make e2e` checks that both charts draw, that the switches move the gauges, and that the page still does not scroll sideways at iPhone size.
+
 VERIFIED: `tests/contracts.test.ts` adds eight tests for documented contracts no other test reached. Coverage rose from 91.33% to 93.86% of statements, 86.17% to 90.15% of branches, 96.39% to 97.29% of functions and 97.67% to 98.41% of lines. No production code changed.
 
 ## 0.5.0
