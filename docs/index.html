@@ -72,11 +72,12 @@
     }
     /* defuss-shadcn sizes its components for border-box; the page supplies that reset. */
     *, ::before, ::after { box-sizing: border-box; }
-    html { scroll-behavior: smooth; }
+    /* iOS Safari enlarges text in landscape unless told not to; the layout sets its own sizes. */
+    html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
     @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
     body { margin: 0; background: var(--background); color: var(--foreground); font-family: var(--font-sans); }
     code, kbd, pre { font-family: var(--font-mono); }
-    .db-main { display: flex; flex-direction: column; gap: clamp(4.5rem, 10vw, 7.5rem); padding-block-end: 4rem; }
+    .db-main { display: flex; flex-direction: column; gap: clamp(3.5rem, 10vw, 7.5rem); padding-block-end: clamp(2rem, 6vw, 4rem); }
     .db-section { width: 100%; max-width: 76rem; margin-inline: auto; padding-inline: 1rem; box-sizing: border-box; scroll-margin-top: 6rem; }
     .db-display { letter-spacing: -0.03em; font-weight: 700; }
     .db-h2 { margin: 0; font-size: clamp(1.75rem, 3.6vw, 2.5rem); line-height: 1.12; }
@@ -172,6 +173,11 @@
     .db-types tr[data-ok="false"] td:last-child { color: var(--db-fail); }
     .db-note { font-size: 0.85rem; min-height: 1.2em; }
 
+    /* Tables: cells never wrap, so a narrow screen scrolls the table sideways; even rows are tinted to keep a row in view. */
+    .table :is(.table-head, .table-cell) { white-space: nowrap; }
+    /* Mixed in sRGB: white carries hue 0 in oklch, which would tint the stripe pink. */
+    .table tbody .table-row:nth-child(even) { background: color-mix(in srgb, var(--db-violet) 7%, var(--card)); }
+
 
     /* Section labels render as badges. */
     .mk-section-header-eyebrow { display: inline-flex; align-items: center; margin-bottom: 0.85rem; padding: 0.35rem 0.85rem; border-radius: 999px; font-size: 0.92rem; font-weight: 600; letter-spacing: 0.01em; text-transform: none;
@@ -227,6 +233,14 @@
     .db-band { position: relative; isolation: isolate; padding-block: clamp(4rem, 8vw, 6rem); background: var(--muted); }
     .db-band-pattern { position: absolute; inset: 0; z-index: -1; --shape-ink: color-mix(in oklch, var(--foreground) 6%, transparent); --shape-pattern: 22px; }
     .db-scope { margin-top: 1rem; font-size: 0.9rem; color: var(--muted-foreground); max-width: 52rem; }
+    /* Redis comparison: one table, then the reasons behind its numbers. */
+    .db-h3 { margin: clamp(2.5rem, 5vw, 3.5rem) 0 0; font-size: clamp(1.35rem, 2.6vw, 1.75rem); line-height: 1.2; }
+    .db-redis { margin-top: 1.25rem; background: var(--card); }
+    .db-redis + .db-redis { margin-top: 0.9rem; }
+    .db-redis th[scope="row"] { font-weight: 600; }
+    .db-points { list-style: none; margin: 1.25rem 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr)); gap: 0.9rem; }
+    .db-points li { padding: 1rem 1.15rem; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); color: var(--muted-foreground); line-height: 1.5; }
+    .db-points strong { display: block; margin-bottom: 0.25rem; color: var(--foreground); }
 
     .db-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 21rem), 1fr)); gap: 1.25rem; margin-top: 2rem; }
     .db-choice { display: flex; flex-direction: column; gap: 0.6rem; padding: 1.4rem 1.5rem; background: var(--card); border: 1px solid var(--border); border-radius: calc(var(--radius) * 1.4); }
@@ -255,6 +269,35 @@
     .db-menu { display: none; }
     @media (max-width: 48rem) { .db-menu { display: inline-flex; } }
     @media (max-width: 40rem) { .db-ledger { grid-template-columns: 1fr; } }
+
+    /* Phones: the sticky header already sits above the hero, code scrolls sideways instead of wrapping,
+       cards put their icon beside the heading, and the steps become a compact numbered list. */
+    @media (max-width: 48rem) {
+      .db-hero { padding-block-start: 1.5rem; }
+      .db-window { padding: 0.6rem; border-radius: calc(var(--radius) * 1.4); }
+      .mockup-code { font-size: 0.8rem; }
+      .db-window .mockup-code[data-wrap] { grid-template-columns: minmax(100%, max-content); }
+      .db-window .mockup-code[data-wrap] > pre { white-space: pre; overflow-wrap: normal; padding-inline-start: var(--_px); text-indent: 0; }
+      .db-flow-steps { gap: 1.25rem; }
+      .db-flow-steps li { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; justify-items: start; column-gap: 0.85rem; padding: 0.75rem 1rem; text-align: start; }
+      .db-flow-n { grid-row: span 2; margin: 0; }
+      .db-flow-steps li:not(:last-child)::after { inset-inline-start: calc(1.9rem - 1px); top: calc(100% + 3px); height: calc(1.25rem - 12px); }
+      .db-flow-steps li:not(:last-child)::before { inset-inline-start: calc(1.9rem - 5px); top: calc(100% + 1.25rem - 8px); }
+    }
+    @media (max-width: 40rem) {
+      .db-features, .db-guarantees { gap: 0.9rem; margin-top: 1.5rem; }
+      .db-feature { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 0.65rem 0.9rem; padding: 1.1rem 1.15rem; }
+      .db-feature .db-icon { width: 2.75rem; height: 2.75rem; }
+      .db-feature .db-icon svg { width: 1.45rem; height: 1.45rem; }
+      .db-feature h3 { margin: 0; font-size: 1.1rem; }
+      .db-feature > :not(.db-icon, h3) { grid-column: 1 / -1; }
+      .db-feature .db-file { justify-self: start; margin-top: 0; }
+      .db-stats, .db-demos, .db-choices { gap: 0.9rem; margin-top: 1.5rem; }
+      .db-log { min-height: 0; }
+      /* The tab list is an inline grid of columns; stacked rows keep the full labels. */
+      .db-install .tab-list { display: grid; grid-auto-flow: row; grid-auto-columns: auto; grid-template-columns: minmax(0, 1fr); width: 100%; height: auto; }
+      .db-footer .mk-footer-inner { padding-top: 2.5rem; }
+    }
   </style>
   <script type="module" src="https://cdn.jsdelivr.net/gh/kyr0/defuss-shadcn@v0.9.14/dist/components/all.js" integrity="sha384-Mq1xC+XFY/imVL24hx8azU48HFzatfOfXQgT7k9Y4MBZmRBG7TDiKCUcnwHGGzZa" crossorigin="anonymous"></script>
   <script type="module" src="https://cdn.jsdelivr.net/gh/kyr0/defuss-shadcn@v0.9.14/dist/components/shader/shader.js" integrity="sha384-ii/hVHqhXyczuS5j5KWW+JLr75Blxl1KcjczeHFoNEPJayV3UJh2ZA/hKZnGUZ/j" crossorigin="anonymous"></script>
@@ -345,7 +388,7 @@
     <div class="corner-blob-3 db-blob db-blob-b" aria-hidden="true"></div>
     <div class="mk-hero" data-variant="split" data-align="start">
       <div class="mk-hero-copy">
-        <a class="mk-hero-pill" href="#install"><span class="badge" data-size="sm">v0.4.0</span><span>MIT licensed, ESM and CommonJS, TypeScript declarations</span></a>
+        <a class="mk-hero-pill" href="#install"><span class="badge" data-size="sm">v0.5.0</span><span>MIT licensed, ESM and CommonJS, TypeScript declarations</span></a>
         <h1 class="mk-hero-title db-display" id="hero-title">Transactional key-value storage for <em>DSON</em></h1>
         <p class="mk-hero-desc">defuss-dbsonl runs on Node.js, Bun and in dedicated browser workers. Batches and transactions publish all of their changes or none, snapshots keep reading the state they opened on, and several processes or workers can share one database.</p>
         <p class="db-dson"><a class="db-link" href="https://dson.defuss.org">DSON</a> is typed JSON that keeps <span class="text-rotate db-rotate" data-effect="fade" style="--text-rotate-duration:12s"><span><span>Map and Set</span><span>Date and RegExp</span><span>bigint</span><span>typed arrays</span><span>undefined and NaN</span><span>cyclic references</span></span></span></p>
@@ -490,8 +533,8 @@
           <p>The button stores one object with a date, bytes, a bigint, an <code>undefined</code> property and a reference to itself, then reads it back and checks each field.</p>
           <div class="table-container">
             <table class="table db-types">
-              <thead><tr><th scope="col">Field</th><th scope="col">Read back</th><th scope="col">Result</th></tr></thead>
-              <tbody id="types-out"><tr><td colspan="3">Not stored yet.</td></tr></tbody>
+              <thead><tr class="table-row"><th class="table-head" scope="col">Field</th><th class="table-head" scope="col">Read back</th><th class="table-head" scope="col">Result</th></tr></thead>
+              <tbody id="types-out"><tr class="table-row"><td class="table-cell" colspan="3">Not stored yet.</td></tr></tbody>
             </table>
           </div>
           <div class="db-actions"><button class="btn" type="button" id="types-run">Store and read back</button></div>
@@ -588,11 +631,11 @@
       </article>
       <article class="db-choice">
         <h3>Transactions</h3>
-        <p class="db-chosen">One revision check for the whole database</p>
-        <p class="db-instead">Instead of per-key conflict detection</p>
+        <p class="db-chosen">Recheck every key the transaction read</p>
+        <p class="db-instead">Instead of one revision check for the whole database</p>
         <dl>
-          <div data-kind="gain"><dt>Why</dt><dd>It rules out write skew and range phantoms without tracking read sets.</dd></div>
-          <div data-kind="cost"><dt>Cost</dt><dd>Writers on disjoint keys can still conflict.</dd></div>
+          <div data-kind="gain"><dt>Why</dt><dd>Writers on disjoint keys commit without retrying, and write skew and phantoms are still ruled out.</dd></div>
+          <div data-kind="cost"><dt>Cost</dt><dd>A transaction remembers each key it read; after a scan it falls back to the whole-database check.</dd></div>
         </dl>
       </article>
       <article class="db-choice">
@@ -653,20 +696,52 @@
         <summary>All modes, in milliseconds per 1000 operations</summary>
         <div class="table-container">
           <table class="table">
-            <thead><tr><th scope="col">Runtime</th><th scope="col">Storage</th><th scope="col">Point read</th><th scope="col">Snapshot read</th><th scope="col">Scan</th><th scope="col">Batch</th><th scope="col">Compaction</th><th scope="col">Reopen</th></tr></thead>
+            <thead><tr class="table-row"><th class="table-head" scope="col">Runtime</th><th class="table-head" scope="col">Storage</th><th class="table-head" scope="col" data-numeric>Point read</th><th class="table-head" scope="col" data-numeric>Snapshot read</th><th class="table-head" scope="col" data-numeric>Scan</th><th class="table-head" scope="col" data-numeric>Batch</th><th class="table-head" scope="col" data-numeric>Compaction</th><th class="table-head" scope="col" data-numeric>Reopen</th></tr></thead>
             <tbody>
-                <tr><td>Node.js (V8)</td><td>native async</td><td>31.14</td><td>12.98</td><td>5.55</td><td>18.68</td><td>24.65</td><td>0.52</td></tr>
-                <tr><td>Node.js (V8)</td><td>native sync</td><td>13.85</td><td>5.17</td><td>3.76</td><td>17.60</td><td>23.00</td><td>0.42</td></tr>
-                <tr><td>Node.js (V8)</td><td>memory</td><td>11.21</td><td>4.81</td><td>4.34</td><td>9.18</td><td>10.98</td><td>0.03</td></tr>
-                <tr><td>Bun (JSC)</td><td>native async</td><td>41.10</td><td>17.35</td><td>9.37</td><td>12.84</td><td>19.37</td><td>0.31</td></tr>
-                <tr><td>Bun (JSC)</td><td>native sync</td><td>28.45</td><td>8.24</td><td>6.86</td><td>12.54</td><td>16.81</td><td>0.32</td></tr>
-                <tr><td>Bun (JSC)</td><td>memory</td><td>23.50</td><td>7.56</td><td>6.76</td><td>10.03</td><td>13.26</td><td>0.03</td></tr>
+                <tr class="table-row"><td class="table-cell">Node.js (V8)</td><td class="table-cell">native async</td><td class="table-cell" data-numeric>31.14</td><td class="table-cell" data-numeric>12.98</td><td class="table-cell" data-numeric>5.55</td><td class="table-cell" data-numeric>18.68</td><td class="table-cell" data-numeric>24.65</td><td class="table-cell" data-numeric>0.52</td></tr>
+                <tr class="table-row"><td class="table-cell">Node.js (V8)</td><td class="table-cell">native sync</td><td class="table-cell" data-numeric>13.85</td><td class="table-cell" data-numeric>5.17</td><td class="table-cell" data-numeric>3.76</td><td class="table-cell" data-numeric>17.60</td><td class="table-cell" data-numeric>23.00</td><td class="table-cell" data-numeric>0.42</td></tr>
+                <tr class="table-row"><td class="table-cell">Node.js (V8)</td><td class="table-cell">memory</td><td class="table-cell" data-numeric>11.21</td><td class="table-cell" data-numeric>4.81</td><td class="table-cell" data-numeric>4.34</td><td class="table-cell" data-numeric>9.18</td><td class="table-cell" data-numeric>10.98</td><td class="table-cell" data-numeric>0.03</td></tr>
+                <tr class="table-row"><td class="table-cell">Bun (JSC)</td><td class="table-cell">native async</td><td class="table-cell" data-numeric>41.10</td><td class="table-cell" data-numeric>17.35</td><td class="table-cell" data-numeric>9.37</td><td class="table-cell" data-numeric>12.84</td><td class="table-cell" data-numeric>19.37</td><td class="table-cell" data-numeric>0.31</td></tr>
+                <tr class="table-row"><td class="table-cell">Bun (JSC)</td><td class="table-cell">native sync</td><td class="table-cell" data-numeric>28.45</td><td class="table-cell" data-numeric>8.24</td><td class="table-cell" data-numeric>6.86</td><td class="table-cell" data-numeric>12.54</td><td class="table-cell" data-numeric>16.81</td><td class="table-cell" data-numeric>0.32</td></tr>
+                <tr class="table-row"><td class="table-cell">Bun (JSC)</td><td class="table-cell">memory</td><td class="table-cell" data-numeric>23.50</td><td class="table-cell" data-numeric>7.56</td><td class="table-cell" data-numeric>6.76</td><td class="table-cell" data-numeric>10.03</td><td class="table-cell" data-numeric>13.26</td><td class="table-cell" data-numeric>0.03</td></tr>
             </tbody>
           </table>
         </div>
         <p>Synchronous I/O is opt-in and blocks its thread, including during flushes; use it in a worker or CLI. Batch, compaction and reopen are per workload, not per operation.</p>
       </details>
-      <p class="db-scope">Three runs with a warm file cache on a busy machine (load average 4.6 to 8.3). They do not measure cold-disk latency or power-loss behavior. Raw samples are in <a href="https://github.com/kyr0/defuss-dbjsonl/blob/main/validation/bench-macos-arm64.json">validation/bench-macos-arm64.json</a>, and <code>make bench</code> repeats the run on your machine.</p>
+      <p class="db-scope">Measured under load: other work kept the machine busy through all three runs (load average 4.6 to 8.3), so every figure includes contention for CPU and I/O. The file cache was warm; cold-disk latency was not measured. Raw samples are in <a href="https://github.com/kyr0/defuss-dbjsonl/blob/main/validation/bench-macos-arm64.json">validation/bench-macos-arm64.json</a>, and <code>make bench</code> repeats the run on your machine.</p>
+
+      <h3 class="db-h3 db-display" id="redis">Compared with Redis transactions</h3>
+      <p class="db-lead">One process per runtime ran each workload on defuss-dbsonl and on Redis 8.10.3 over loopback TCP with the node-redis client. Redis transactions use <code>WATCH</code>, <code>MULTI</code> and <code>EXEC</code>; defuss-dbsonl uses <code>transaction()</code>. Durable pairs a flushed file commit with Redis <code>appendfsync always</code>; memory pairs the memory backend with Redis without persistence.</p>
+      <div class="table-container db-redis">
+        <table class="table">
+          <thead><tr class="table-row"><th class="table-head" scope="col">Durable, per operation</th><th class="table-head" scope="col" data-numeric>dbsonl, Node.js</th><th class="table-head" scope="col" data-numeric>Redis, Node.js client</th><th class="table-head" scope="col" data-numeric>dbsonl, Bun</th><th class="table-head" scope="col" data-numeric>Redis, Bun client</th></tr></thead>
+          <tbody>
+            <tr class="table-row"><th class="table-cell" scope="row">Point read</th><td class="table-cell" data-numeric>27 µs</td><td class="table-cell" data-numeric>47 µs</td><td class="table-cell" data-numeric>32 µs</td><td class="table-cell" data-numeric>39 µs</td></tr>
+            <tr class="table-row"><th class="table-cell" scope="row">Transaction, read 2 keys and write 2</th><td class="table-cell" data-numeric>7.6 ms</td><td class="table-cell" data-numeric>3.8 ms</td><td class="table-cell" data-numeric>0.43 ms</td><td class="table-cell" data-numeric>3.8 ms</td></tr>
+            <tr class="table-row"><th class="table-cell" scope="row">Same, 4 writers at once, per commit</th><td class="table-cell" data-numeric>1.9 ms</td><td class="table-cell" data-numeric>3.0 ms</td><td class="table-cell" data-numeric>0.17 ms</td><td class="table-cell" data-numeric>3.0 ms</td></tr>
+            <tr class="table-row"><th class="table-cell" scope="row">Atomic batch of 1000 writes</th><td class="table-cell" data-numeric>13.4 ms</td><td class="table-cell" data-numeric>6.6 ms</td><td class="table-cell" data-numeric>2.7 ms</td><td class="table-cell" data-numeric>5.3 ms</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="table-container db-redis">
+        <table class="table">
+          <thead><tr class="table-row"><th class="table-head" scope="col">In memory, per operation</th><th class="table-head" scope="col" data-numeric>dbsonl, Node.js</th><th class="table-head" scope="col" data-numeric>Redis, Node.js client</th><th class="table-head" scope="col" data-numeric>dbsonl, Bun</th><th class="table-head" scope="col" data-numeric>Redis, Bun client</th></tr></thead>
+          <tbody>
+            <tr class="table-row"><th class="table-cell" scope="row">Point read</th><td class="table-cell" data-numeric>12 µs</td><td class="table-cell" data-numeric>42 µs</td><td class="table-cell" data-numeric>20 µs</td><td class="table-cell" data-numeric>44 µs</td></tr>
+            <tr class="table-row"><th class="table-cell" scope="row">Transaction, read 2 keys and write 2</th><td class="table-cell" data-numeric>0.082 ms</td><td class="table-cell" data-numeric>0.16 ms</td><td class="table-cell" data-numeric>0.093 ms</td><td class="table-cell" data-numeric>0.21 ms</td></tr>
+            <tr class="table-row"><th class="table-cell" scope="row">Same, 4 writers at once, per commit</th><td class="table-cell" data-numeric>0.063 ms</td><td class="table-cell" data-numeric>0.076 ms</td><td class="table-cell" data-numeric>0.069 ms</td><td class="table-cell" data-numeric>0.084 ms</td></tr>
+            <tr class="table-row"><th class="table-cell" scope="row">Atomic batch of 1000 writes</th><td class="table-cell" data-numeric>5.4 ms</td><td class="table-cell" data-numeric>2.5 ms</td><td class="table-cell" data-numeric>2.2 ms</td><td class="table-cell" data-numeric>1.4 ms</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <ul class="db-points">
+        <li><strong>Faster in 12 of 16 pairings.</strong> Every read, every transaction in memory, every run of four writers and every Bun write on disk take less time than Redis. defuss-dbsonl 0.4.0 led in 4.</li>
+        <li><strong>A lone durable writer on Node.js loses to flushes.</strong> A commit flushes the data file and then the head slot; Redis flushes once per <code>EXEC</code>. A flush took about 3 ms under Node.js on this Mac and 0.04 ms under Bun. Four writers share both flushes in one commit group and take 0.65 of Redis's time.</li>
+        <li><strong>Concurrent writers share a commit.</strong> A forming group waits briefly for transactions that already hold a snapshot, and a transaction rechecks only the keys it read, so the four writers committed together without a single retry; under 0.4.0 they retried up to 2.9 times per commit.</li>
+        <li><strong>Batches in memory pay for encoding.</strong> Every value is its own checksummed DSON frame; in a profile that is about half of a batch's time, while the Redis client serializes with the built-in <code>JSON.stringify</code>.</li>
+      </ul>
+      <p class="db-scope">Median of three runs of <code>make bench-redis</code> on the current source with defuss-dson 1.4.0 and defuss-storage 0.3.1, each the median of seven rounds over 1000 records after two warmups; the load average ranged from 5.5 to 10.9, and each engine's turn started after a full garbage collection. Raw samples are in <a href="https://github.com/kyr0/defuss-dbjsonl/blob/main/validation/bench-redis-macos-arm64.json">validation/bench-redis-macos-arm64.json</a>; the 0.4.0 runs are in <a href="https://github.com/kyr0/defuss-dbjsonl/blob/main/validation/bench-redis-macos-arm64-baseline.json">bench-redis-macos-arm64-baseline.json</a>.</p>
     </div>
     <div class="edge-wave-bottom" aria-hidden="true"></div>
   </section>
@@ -676,11 +751,11 @@
     <h2 class="db-h2 db-display" id="tests-title">Tested on real files, locks and workers</h2>
     <p class="db-lead">The tests run against real memory and native storage, real kernel locks and real browser workers, with no mocks: the defects that matter here, such as partial reads, torn slots and lock lifetimes, live inside the subsystems a mock would replace.</p>
     <div class="db-rings">
-      <div class="db-ring"><div class="radial-progress" role="meter" aria-valuenow="24" aria-valuemin="0" aria-valuemax="24" data-format="value" style="--value:100" aria-label="24 of 24 tests pass">24</div><span>tests pass; 1 Linux-only test skipped on macOS</span></div>
-      <div class="db-ring"><div class="radial-progress" role="meter" aria-valuenow="90.19" aria-valuemin="0" aria-valuemax="100" style="--value:90.19" aria-label="90.19 percent statement coverage">90%</div><span>statements covered, 85% required</span></div>
-      <div class="db-ring"><div class="radial-progress" role="meter" aria-valuenow="85.41" aria-valuemin="0" aria-valuemax="100" style="--value:85.41" aria-label="85.41 percent branch coverage">85%</div><span>branches covered, 75% required</span></div>
-      <div class="db-ring"><div class="radial-progress" role="meter" aria-valuenow="96.7" aria-valuemin="0" aria-valuemax="100" style="--value:96.7" aria-label="96.7 percent function coverage">97%</div><span>functions covered, 85% required</span></div>
-      <div class="db-ring"><div class="radial-progress" role="meter" aria-valuenow="97.92" aria-valuemin="0" aria-valuemax="100" style="--value:97.92" aria-label="97.92 percent line coverage">98%</div><span>lines covered, 85% required</span></div>
+      <div class="db-ring"><div class="radial-progress" role="meter" aria-valuenow="32" aria-valuemin="0" aria-valuemax="32" data-format="value" style="--value:100" aria-label="32 of 32 tests pass">32</div><span>tests pass on macOS</span></div>
+      <div class="db-ring"><div class="radial-progress" role="meter" aria-valuenow="91.33" aria-valuemin="0" aria-valuemax="100" style="--value:91.33" aria-label="91.33 percent statement coverage">91%</div><span>statements covered, 85% required</span></div>
+      <div class="db-ring"><div class="radial-progress" role="meter" aria-valuenow="86.17" aria-valuemin="0" aria-valuemax="100" style="--value:86.17" aria-label="86.17 percent branch coverage">86%</div><span>branches covered, 75% required</span></div>
+      <div class="db-ring"><div class="radial-progress" role="meter" aria-valuenow="96.39" aria-valuemin="0" aria-valuemax="100" style="--value:96.39" aria-label="96.39 percent function coverage">96%</div><span>functions covered, 85% required</span></div>
+      <div class="db-ring"><div class="radial-progress" role="meter" aria-valuenow="97.67" aria-valuemin="0" aria-valuemax="100" style="--value:97.67" aria-label="97.67 percent line coverage">98%</div><span>lines covered, 85% required</span></div>
     </div>
     <div class="db-features">
       <article class="db-feature"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-tree"/></svg></span><h3>Tree against a Map</h3><p>Every tree result is compared with an independent Map, alongside atomic batches, snapshots, conflicts, phantoms and quota failures.</p><code class="db-file">mvcc.test.ts</code></article>
@@ -699,7 +774,7 @@
       <li class="db-feature"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-atom"/></svg></span><h3>All or nothing</h3><p>A batch or transaction becomes visible at once, as one revision, or not at all.</p></li>
       <li class="db-feature"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-merge"/></svg></span><h3>Serializable transactions</h3><p>A transaction commits only if no other commit published after its snapshot; otherwise it fails with <code>CONFLICT</code> instead of running your callback again.</p></li>
       <li class="db-feature"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-camera"/></svg></span><h3>Stable snapshots</h3><p>A snapshot reads the same root until you close it, while writers keep committing.</p></li>
-      <li class="db-feature"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-flush"/></svg></span><h3>Flushed before published</h3><p>Values and index pages reach the device before a head slot points at them. On servers, directory metadata is synced too.</p></li>
+      <li class="db-feature"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-flush"/></svg></span><h3>Flushed before published</h3><p>Values and index pages reach the device before a head slot points at them. On servers, the directory is synced whenever a file is created or removed.</p></li>
       <li class="db-feature"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-slots"/></svg></span><h3>Crash-safe heads</h3><p>Two checksummed slots survive an interrupted write of either one. A writer reuses the unpublished tail of a failed commit.</p></li>
       <li class="db-feature"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-shield"/></svg></span><h3>Fails closed</h3><p>Corrupt published data fails its checksum or <code>verify()</code>; nothing is repaired by guessing.</p></li>
       <li class="db-feature"><span class="db-icon corner-leaf" aria-hidden="true"><svg><use href="#i-clock"/></svg></span><h3>Locks without timeouts</h3><p>Kernel locks and Web Locks are released when their process or worker ends, never by a clock.</p></li>

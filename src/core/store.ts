@@ -1,5 +1,5 @@
 /** VERIFIED: One published root is the atomicity boundary for every batch and transaction. */
-import { encodeFrame, decodeFrame } from 'defuss-dson/sequence';
+import { decodeFrame, encodeFrame } from 'defuss-dson/sequence';
 import type { CancellationSignal } from 'defuss-storage';
 import { withFile, locked } from './backend.js';
 import { DbsonlError, abort, key, name as validateName, options as resolveOptions, natural, corrupt } from './common.js';
@@ -7,15 +7,25 @@ import type { Limits } from './common.js';
 import { Appender, generationFile, headFile, publish, readHead, readValue, PAGE_BYTES } from './io.js';
 import type { HeadCache, ReadWindow } from './io.js';
 import { entries, find, validatePage, BulkTree, BatchTree } from './tree.js';
-import type { Backend, Head, Page, Ref, Release, Options, Lookup, Row, ScanOptions, Mutation, Commit, CommitOptions, Stats, Transaction } from './types.js';
+import type { Backend, Entry, Head, Page, Ref, Release, Options, Lookup, Row, ScanOptions, Mutation, Commit, CommitOptions, Stats, Transaction } from './types.js';
 
 type Encoded = { key: string; bytes: Uint8Array | undefined };
+/** A transaction's point reads, checked key by key at commit. After a scan or too many reads, whole falls back to the database revision. */
+interface ReadSet { snapshot: number; keys: Map<string, number>; whole: boolean }
+/** One queued commit. done guards against settling twice when a group falls back to single commits. */
+interface Member { input: Encoded[]; ifRevision: number | undefined; reads: ReadSet | undefined; signal: CancellationSignal | undefined; done: boolean; resolve(commit: Commit): void; reject(error: unknown): void }
+const GROUP_MEMBERS = 64;
+/** Every supported runtime (Node, Bun, browser workers) has these; the ES2022 lib does not declare them. */
+const clock = globalThis as unknown as { performance: { now(): number }; setTimeout(run: () => void, ms: number): unknown; clearTimeout(timer: unknown): void };
+const encodedBytes = (input: Encoded[]) => input.reduce((sum, item) => sum + (item.bytes?.length ?? 0) + item.key.length * 2 + 64, 0);
 function newGeneration(): string {
   const crypto = (globalThis as unknown as { crypto: { randomUUID(): string } }).crypto;
   if (!crypto?.randomUUID) throw new DbsonlError('UNSUPPORTED', 'A secure randomUUID implementation is required.');
   return crypto.randomUUID().replaceAll('-', '');
 }
 function code(error: unknown): string | undefined { return (error as { code?: string })?.code; }
+/** Addresses inside a generation are immutable below its published end, so they name a page for good. */
+const pageId = (head: Readonly<Head>, ref: Ref) => `${head.generation}:${ref.offset}:${ref.byteLength}`;
 
 /** Immutable root, explicit lifetime. Holding it never reserves the writer's commit lock. */
 export class ReadSession<T = unknown> {
@@ -81,19 +91,33 @@ export class ReadSession<T = unknown> {
 }
 
 /**
- * Multi-client transactional store. Concurrent writers queue at the shared coordinator;
- * optimistic callbacks detect conflicts against the complete database revision.
+ * Multi-client transactional store. Commits queued on one handle publish together under one
+ * commit lock; optimistic callbacks detect conflicts on the keys they read.
  */
 export class Dbsonl<T = unknown> {
   private closed = false;
   private closing: Promise<void> | undefined;
   private pending = new Set<Promise<unknown>>();
   private sessions = new Set<ReadSession<T>>();
-  private cache = new Map<string, { page: Page; bytes: number }>();
+  private cache = new Map<string, { page: Page; bytes: number; used: boolean }>();
   private cacheBytes = 0;
   private reservedBytes = 0;
   private readonly limits: Limits;
   private readonly headCache: HeadCache = {};
+  private queue: Member[] = [];
+  private draining = false;
+  /** The running drain; close() waits for it, because receipts resolve before the group releases the lock. */
+  private drained: Promise<void> = Promise.resolve();
+  /** The flushed head while this handle's commit group holds the commit lock; see snapshot(). */
+  private lockedHead: Head | undefined;
+  /** Pins taken under lockedHead; the group keeps the lock until they are granted. */
+  private pinning = new Set<Promise<Release>>();
+  /** Transactions on this handle that hold a snapshot and have not queued their commit yet; see gather(). */
+  private preparing = new Set<object>();
+  /** Wakes a group waiting in gather() when a commit arrives or a preparing transaction ends. */
+  private arrival: (() => void) | undefined;
+  /** Wall time of the last group publication in ms, which bounds gather(). */
+  private groupCost = 0;
   constructor(readonly backend: Backend, readonly name: string, options: Options, private readonly closeBackend?: Release) { this.limits = resolveOptions(options); }
   private run<R>(fn: () => Promise<R>): Promise<R> {
     if (this.closed) return Promise.reject(new DbsonlError('CLOSED', 'Database is closed.'));
@@ -105,34 +129,60 @@ export class Dbsonl<T = unknown> {
   }
   /** Internal cache returns immutable implementation-owned pages, never application values. */
   private load(head: Readonly<Head>, ref: Ref): Page | Promise<Page> {
-    const id = `${head.generation}:${ref.offset}:${ref.byteLength}`;
-    const cached = this.cache.get(id);
-    if (cached) { this.cache.delete(id); this.cache.set(id, cached); return cached.page; }
-    return this.loadUncached(head, ref, id);
+    const id = pageId(head, ref);
+    return this.cached(id) ?? this.loadUncached(head, ref, id);
+  }
+  /**
+   * Second-chance eviction instead of exact LRU: a hit only marks its page, and eviction moves a marked page
+   * to the back once instead of dropping it. Reordering the Map on every hit took about 5% of a memory commit.
+   */
+  private cached(id: string): Page | undefined {
+    const hit = this.cache.get(id);
+    if (hit) hit.used = true;
+    return hit?.page;
   }
   /** The cold path alone allocates an asynchronous load operation. */
   private async loadUncached(head: Readonly<Head>, ref: Ref, id: string): Promise<Page> {
-    const page = validatePage(await readValue(this.backend, this.name, head, ref, PAGE_BYTES), ref);
-    if (ref.byteLength <= this.limits.maxCacheBytes && this.limits.maxCachePages) {
-      // Concurrent reads of the same page must not charge the cache twice.
-      const existing = this.cache.get(id); if (existing) return existing.page;
-      this.cache.set(id, { page, bytes: ref.byteLength }); this.cacheBytes += ref.byteLength;
-      while (this.cacheBytes > this.limits.maxCacheBytes || this.cache.size > this.limits.maxCachePages) {
-        const oldest = this.cache.keys().next().value!;
-        this.cacheBytes -= this.cache.get(oldest)!.bytes; this.cache.delete(oldest);
-      }
+    return this.remember(id, validatePage(await readValue(this.backend, this.name, head, ref, PAGE_BYTES), ref), ref.byteLength);
+  }
+  private remember(id: string, page: Page, bytes: number): Page {
+    if (bytes > this.limits.maxCacheBytes || !this.limits.maxCachePages) return page;
+    // Concurrent reads of the same page must not charge the cache twice.
+    const existing = this.cache.get(id); if (existing) return existing.page;
+    // Marked on insert: in an A/B of four memory writers this was slightly faster than leaving new pages unmarked.
+    this.cache.set(id, { page, bytes, used: true }); this.cacheBytes += bytes;
+    while (this.cacheBytes > this.limits.maxCacheBytes || this.cache.size > this.limits.maxCachePages) {
+      const [oldest, entry] = this.cache.entries().next().value!;
+      this.cache.delete(oldest);
+      // Each pass clears a mark, so the loop ends within one round over the cache.
+      if (entry.used) { entry.used = false; this.cache.set(oldest, entry); } else this.cacheBytes -= entry.bytes;
     }
     return page;
   }
   /** Values deliberately bypass the page cache so a caller cannot mutate future reads. */
   private value(head: Readonly<Head>, ref: Ref, window?: ReadWindow): Promise<T> { return readValue(this.backend, this.name, head, ref, this.limits.maxRecordBytes, window); }
   private async snapshot(): Promise<ReadSession<T>> {
+    // While this handle's own commit group holds the commit lock, no process can publish or collect, and
+    // lockedHead is the current flushed head: pin it instead of queueing behind the group's flushes.
+    // Without this, every transaction's snapshot waited for the previous group and groups stayed small.
+    if (this.lockedHead) {
+      const head = this.lockedHead;
+      const pinning = this.pin(head); this.pinning.add(pinning);
+      try { return this.session(head, await pinning); } finally { this.pinning.delete(pinning); }
+    }
     return locked(this.backend, `commit-${this.name}`, async () => {
       const head = await readHead(this.backend, this.name, this.headCache);
-      const release = await this.backend.coordinator.acquire(`pin-${generationFile(this.name, head.generation)}`, true);
-      if (!release) throw new Error('Coordinator did not grant generation pin.');
-      const session = new ReadSession<T>({ load: (head, ref) => this.load(head, ref), value: (head, ref, window) => this.value(head, ref, window), forget: session => { this.sessions.delete(session); } }, Object.freeze(head), release); this.sessions.add(session); return session;
+      return this.session(head, await this.pin(head));
     });
+  }
+  private async pin(head: Head): Promise<Release> {
+    const release = await this.backend.coordinator.acquire(`pin-${generationFile(this.name, head.generation)}`, true);
+    if (!release) throw new Error('Coordinator did not grant generation pin.');
+    return release;
+  }
+  private session(head: Head, release: Release): ReadSession<T> {
+    const session = new ReadSession<T>({ load: (head, ref) => this.load(head, ref), value: (head, ref, window) => this.value(head, ref, window), forget: session => { this.sessions.delete(session); } }, Object.freeze(head), release);
+    this.sessions.add(session); return session;
   }
   /** Pin the currently published root; subsequent writers do not wait for its lifetime. */
   beginRead(): Promise<ReadSession<T>> { return this.run(() => this.snapshot()); }
@@ -176,34 +226,144 @@ export class Dbsonl<T = unknown> {
       return { key: operation.key, bytes: encoded };
     });
   }
-  private async commit(input: Encoded[], options: CommitOptions): Promise<Commit> {
-    abort(options.signal);
-    return locked(this.backend, `commit-${this.name}`, async () => {
-      const head = await readHead(this.backend, this.name, this.headCache);
-      if (options.ifRevision !== undefined && natural(options.ifRevision, 'ifRevision') !== head.revision) throw new DbsonlError('CONFLICT', 'Database changed since the transaction snapshot.');
-      if (!input.length) return { revision: head.revision, count: head.count };
-      const revision = natural(head.revision + 1, 'revision');
+  /**
+   * Queue a commit. The next holder of the commit lock publishes every queued commit with one write,
+   * one data flush and one head flush; each keeps its own revision, checks and receipt, so the result
+   * equals committing them one by one with no reader in between.
+   */
+  private commit(input: Encoded[], options: CommitOptions & { reads?: ReadSet }): Promise<Commit> {
+    try { abort(options.signal); if (options.ifRevision !== undefined) natural(options.ifRevision, 'ifRevision'); }
+    catch (error) { return Promise.reject(error); }
+    return new Promise<Commit>((resolve, reject) => {
+      const member: Member = { input, ifRevision: options.ifRevision, reads: options.reads, signal: options.signal, done: false,
+        resolve: commit => { member.done = true; resolve(commit); }, reject: error => { member.done = true; reject(error); } };
+      this.queue.push(member); this.arrival?.();
+      if (!this.draining) this.drained = this.drain();
+    });
+  }
+  /** Reject cancelled members; true once nobody is left waiting. */
+  private prune(): boolean {
+    this.queue = this.queue.filter(member => { try { abort(member.signal); return true; } catch (error) { member.reject(error); return false; } });
+    return !this.queue.length;
+  }
+  private async drain(): Promise<void> {
+    this.draining = true;
+    // Native and Web Locks waits poll this signal, so a cancelled member leaves the queue while the group waits.
+    const prune = () => this.prune();
+    const waiting: CancellationSignal = { get aborted() { return prune(); } };
+    try {
+      while (this.queue.length) {
+        try {
+          await locked(this.backend, `commit-${this.name}`, async () => {
+            const head = await readHead(this.backend, this.name, this.headCache);
+            // Set before waiting: a transaction that starts meanwhile pins this head instead of queueing behind the lock.
+            this.lockedHead = head;
+            try {
+              await this.gather();
+              let bytes = 0, operations = 0; const group: Member[] = [];
+              while (this.queue.length && group.length < GROUP_MEMBERS) {
+                const next = this.queue[0]!, size = encodedBytes(next.input);
+                if (group.length && (bytes + size > this.limits.maxTransactionBytes || operations + next.input.length > this.limits.maxTransactionOperations)) break;
+                bytes += size; operations += next.input.length; group.push(this.queue.shift()!);
+              }
+              const started = clock.performance.now();
+              if (group.length) await this.publishGroup(group, head);
+              this.groupCost = clock.performance.now() - started;
+            } finally { this.lockedHead = undefined; await Promise.allSettled(this.pinning); }
+          }, waiting);
+        } catch (error) {
+          // ABORTED only means the queue emptied while waiting; members queued since then are drained next.
+          // Any other failure to take the lock is shared by everyone still queued.
+          if (code(error) !== 'ABORTED') for (const member of this.queue.splice(0)) member.reject(error);
+        }
+      }
+    } finally { this.draining = false; }
+  }
+  /**
+   * Caller holds the commit lock and lockedHead is set. A transaction that already holds its snapshot would
+   * otherwise commit just after this group formed and need a group of its own: four writers on one handle
+   * alternated between groups of one and three members, each paying both flushes. So wait while such
+   * transactions remain, waking on every arrival, for at most half the last group's publication time. One
+   * that outlasts the wait is not waited for again, and a lone writer never waits.
+   */
+  private async gather(): Promise<void> {
+    if (!this.preparing.size || !this.groupCost) return;
+    const deadline = clock.performance.now() + this.groupCost / 2;
+    while (this.preparing.size) {
+      const remaining = deadline - clock.performance.now();
+      if (remaining <= 0) { this.preparing.clear(); break; }
+      await new Promise<void>(resolve => {
+        const timer = clock.setTimeout(() => { this.arrival = undefined; resolve(); }, remaining);
+        this.arrival = () => { clock.clearTimeout(timer); this.arrival = undefined; resolve(); };
+      });
+    }
+  }
+  /** Caller holds the commit lock. Never throws: every member is settled. head is the current head, if known. */
+  private async publishGroup(group: Member[], known?: Head): Promise<void> {
+    let publishing = false;
+    try {
+      const head = known ?? await readHead(this.backend, this.name, this.headCache);
+      this.lockedHead = head;
+      // Decide each member in order against the state the members before it leave behind.
+      let revision = head.revision;
+      const written = new Set<string>(), accepted: { member: Member; revision: number }[] = [];
+      for (const member of group) {
+        try {
+          abort(member.signal);
+          if (member.ifRevision !== undefined && member.ifRevision !== revision) throw new DbsonlError('CONFLICT', 'Database changed since the transaction snapshot.');
+          if (member.reads && member.reads.snapshot !== revision) await this.validate(head, member.reads, written);
+        } catch (error) { member.reject(error); continue; }
+        if (member.input.length) { revision = natural(revision + 1, 'revision'); for (const operation of member.input) written.add(operation.key); }
+        accepted.push({ member, revision });
+      }
+      if (revision === head.revision) { for (const { member } of accepted) member.resolve({ revision, count: head.count }); return; }
       const next = await withFile(this.backend, generationFile(this.name, head.generation), {}, async file => {
-        if (await file.size() < head.end) corrupt('Committed generation is truncated.');
+        const size = await file.size();
+        if (size < head.end) corrupt('Committed generation is truncated.');
         // An interrupted, unpublished transaction owns only bytes after this boundary.
-        await file.truncate(head.end);
+        if (size > head.end) await file.truncate(head.end);
         const writer = new Appender(file, head.end, this.limits, this.backend.writeChunkBytes);
-        const tree = new BatchTree(writer, head.root, head.count, this.limits.maxTransactionBytes);
-        for (const operation of input) {
-          abort(options.signal);
-          const entry = operation.bytes ? { key: operation.key, ref: await writer.bytes(operation.bytes), revision } : undefined;
-          await tree.apply(operation.key, entry);
+        // A group holds no more operations than one batch may, so one batch's page budget applies; a group
+        // that still exceeds it falls back to single commits below.
+        const tree = new BatchTree(writer, head.root, head.count, this.limits.maxTransactionBytes, ref => this.cached(pageId(head, ref)));
+        const counts: number[] = [];
+        for (const { member, revision } of accepted) {
+          for (const operation of member.input) {
+            abort(member.signal);
+            let entry: Entry | undefined;
+            // Both calls finish synchronously unless they need I/O; awaiting every write cost a microtask each.
+            if (operation.bytes) { const ref = writer.bytes(operation.bytes); entry = { key: operation.key, ref: ref instanceof Promise ? await ref : ref, revision }; }
+            const applying = tree.apply(operation.key, entry); if (applying) await applying;
+          }
+          counts.push(tree.size);
         }
         const { root, count } = await tree.finish();
         await writer.flush();
         await file.flush();
-        return { ...head, publication: natural(head.publication + 1, 'publication'), revision, root, count, end: writer.end };
+        return { head: { ...head, publication: natural(head.publication + 1, 'publication'), revision, root, count, end: writer.end }, written: tree.written, counts };
       });
       // Cancellation is no longer observed once publication starts: a successful commit gets a receipt.
-      try { await publish(this.backend, this.name, next); }
-      catch (cause) { throw new DbsonlError('COMMIT_UNCERTAIN', 'Head publication failed; read the current revision before retrying.', { cause }); }
-      return { revision, count: next.count };
-    }, options.signal);
+      publishing = true;
+      try { await publish(this.backend, this.name, next.head, this.headCache); }
+      catch (cause) { this.lockedHead = undefined; throw new DbsonlError('COMMIT_UNCERTAIN', 'Head publication failed; read the current revision before retrying.', { cause }); }
+      this.lockedHead = next.head;
+      // Only published pages enter the cache: an unpublished tail is truncated and its addresses reused.
+      for (const { ref, page } of next.written) this.remember(pageId(next.head, ref), page, ref.byteLength);
+      accepted.forEach(({ member, revision }, index) => member.resolve({ revision, count: next.counts[index]! }));
+    } catch (error) {
+      // Nothing was published, so one member's failure (a cancellation, a budget, a full disk) must not fail
+      // the others: commit them one at a time, each against the then current head.
+      if (!publishing && group.length > 1) { for (const member of group) if (!member.done) await this.publishGroup([member]); return; }
+      for (const member of group) if (!member.done) member.reject(error);
+    }
+  }
+  /** Each point read must still see the entry revision it saw, or absence (0); a scan needs the whole database unchanged. */
+  private async validate(head: Head, reads: ReadSet, written: Set<string>): Promise<void> {
+    if (reads.whole) throw new DbsonlError('CONFLICT', 'Database changed since the transaction snapshot.');
+    for (const [id, seen] of reads.keys) {
+      const entry = written.has(id) ? undefined : await find(ref => this.load(head, ref), head.root, id);
+      if (written.has(id) || (entry?.revision ?? 0) !== seen) throw new DbsonlError('CONFLICT', 'A key the transaction read changed after its snapshot.');
+    }
   }
   /** Encode at call time, then publish the entire operation list under one new revision. */
   batch(input: readonly Mutation<T>[], options: CommitOptions = {}): Promise<Commit> {
@@ -211,7 +371,7 @@ export class Dbsonl<T = unknown> {
     if (this.pending.size >= this.limits.maxPendingOperations) return Promise.reject(new DbsonlError('QUEUE_FULL', 'Too many admitted operations.'));
     let encoded: Encoded[];
     try { abort(options.signal); encoded = this.encode(input); } catch (error) { return Promise.reject(error); }
-    const bytes = encoded.reduce((sum, item) => sum + (item.bytes?.length ?? 0) + item.key.length * 2 + 64, 0);
+    const bytes = encodedBytes(encoded);
     if (this.reservedBytes + bytes > this.limits.maxPendingBytes) return Promise.reject(new DbsonlError('QUEUE_FULL', 'Pending encoded-byte capacity exceeded.'));
     this.reservedBytes += bytes;
     const commitOptions = { ...options };
@@ -228,7 +388,17 @@ export class Dbsonl<T = unknown> {
   transaction<R>(callback: (transaction: Transaction<T>) => Promise<R> | R, options: { signal?: CancellationSignal } = {}): Promise<{ result: R; revision: number; count: number }> {
     return this.run(async () => {
       const session = await this.snapshot();
+      // Counted until its commit is queued or it fails, so a forming group can wait for it; see gather().
+      const token = {}; this.preparing.add(token);
+      const prepared = () => { if (this.preparing.delete(token)) this.arrival?.(); };
       const staged = new Map<string, Encoded>(); let size = 0, active = true;
+      const reads: ReadSet = { snapshot: session.revision, keys: new Map(), whole: false };
+      const observe = (id: string, lookup: Lookup<T>) => {
+        if (reads.whole || reads.keys.has(id)) return;
+        // Tracking stays bounded: past the operation budget the transaction falls back to the database revision.
+        if (reads.keys.size >= this.limits.maxTransactionOperations) { reads.whole = true; reads.keys.clear(); return; }
+        reads.keys.set(id, lookup.found ? lookup.revision : 0);
+      };
       const check = () => { if (!active) throw new DbsonlError('CLOSED', 'Transaction callback has finished.'); abort(options.signal); };
       const stage = (operation: Mutation<T>) => {
         check(); const encoded = this.encode([operation])[0]!;
@@ -240,11 +410,17 @@ export class Dbsonl<T = unknown> {
       };
       const tx: Transaction<T> = {
         revision: session.revision,
-        get: async id => { check(); key(id); const item = staged.get(id); return item ? item.bytes ? { found: true, value: decodeFrame(item.bytes).value as T, revision: session.revision + 1 } : { found: false } : session.get(id); },
+        get: async id => {
+          check(); key(id); const item = staged.get(id);
+          if (item) return item.bytes ? { found: true, value: decodeFrame(item.bytes).value as T, revision: session.revision + 1 } : { found: false };
+          const lookup = await session.get(id); observe(id, lookup); return lookup;
+        },
         put: (id, value) => stage({ operation: 'put', key: id, value }),
         delete: id => stage({ operation: 'delete', key: id }),
         async *scan(scan = {}) {
           check();
+          // A range read cannot be checked key by key: absent keys that appear later are phantoms.
+          reads.whole = true; reads.keys.clear();
           // Copy only the bounded overlay. The base remains a pull-driven disk traversal.
           const overlay = [...staged.values()].sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
           let at = 0, emitted = 0;
@@ -266,9 +442,10 @@ export class Dbsonl<T = unknown> {
       };
       try {
         const result = await callback(tx); active = false;
-        const commit = await this.commit([...staged.values()], { ...options, ifRevision: session.revision });
+        this.preparing.delete(token);
+        const commit = await this.commit([...staged.values()], { ...options, reads });
         return { result, ...commit };
-      } finally { active = false; this.reservedBytes -= size; await session.close(); }
+      } finally { prepared(); active = false; this.reservedBytes -= size; await session.close(); }
     });
   }
   /** Read current persisted metadata without scanning values or warming the index cache. */
@@ -347,9 +524,9 @@ export class Dbsonl<T = unknown> {
           const current = await readHead(this.backend, this.name, this.headCache);
           if (current.publication !== head.publication) throw new DbsonlError('CONFLICT', 'Database changed during compaction; retry or use exclusive mode.');
           try {
-            await publish(this.backend, this.name, next);
+            await publish(this.backend, this.name, next, this.headCache);
             // Both fallback slots must reference the new generation before the old one can be unlinked.
-            await publish(this.backend, this.name, { ...next, publication: natural(next.publication + 1, 'publication') });
+            await publish(this.backend, this.name, { ...next, publication: natural(next.publication + 1, 'publication') }, this.headCache);
           } catch (cause) { throw new DbsonlError('COMMIT_UNCERTAIN', 'Compaction publication failed; reopen or inspect stats.', { cause }); }
         };
         if (outerRelease) await install(); else await locked(this.backend, `commit-${this.name}`, install, options.signal);
@@ -362,7 +539,7 @@ export class Dbsonl<T = unknown> {
     return this.run(() => locked(this.backend, `commit-${this.name}`, async () => {
       const head = await readHead(this.backend, this.name, this.headCache);
       // Refresh both slots before reclamation, including recovery after interrupted compaction.
-      await publish(this.backend, this.name, { ...head, publication: natural(head.publication + 1, 'publication') });
+      await publish(this.backend, this.name, { ...head, publication: natural(head.publication + 1, 'publication') }, this.headCache);
       const current = generationFile(this.name, head.generation);
       const removed: string[] = [], retained: string[] = [];
       for (const filename of await this.backend.storage.list()) {
@@ -385,7 +562,7 @@ export class Dbsonl<T = unknown> {
   close(): Promise<void> {
     if (this.closing) return this.closing;
     this.closed = true;
-    this.closing = (async () => { await Promise.allSettled(this.pending); try { await Promise.all([...this.sessions].map(session => session.close())); } finally { this.cache.clear(); this.cacheBytes = 0; await this.closeBackend?.(); } })();
+    this.closing = (async () => { await Promise.allSettled(this.pending); await this.drained; try { await Promise.all([...this.sessions].map(session => session.close())); } finally { this.cache.clear(); this.cacheBytes = 0; await this.closeBackend?.(); } })();
     return this.closing;
   }
 }

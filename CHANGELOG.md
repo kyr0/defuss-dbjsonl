@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.5.0
+
+VERIFIED: The website fits phones: code and tables scroll sideways instead of wrapping, tables tint every other row, cards put their icon beside the heading, and the install tabs stack. `make e2e` now also drives the website in WebKit at iPhone size, including the OPFS counter and the menu sheet, and fails if the page scrolls sideways.
+
+VERIFIED: The OPFS demo replaces a worker that leaves a request unanswered for 5 s, retries a failed open on the next click and shows the browser error behind a failure. The demo was reported to stop on an iPhone after a delete; desktop WebKit and Chromium did not reproduce it, so the cause is still open.
+
+VERIFIED: Commits got cheaper without changing the format or the lock protocol. A commit edits cached copies of the index pages on its paths instead of rereading and decoding them, and caches the pages it publishes. Publication patches the manifest parse cache, skips the directory sync (a commit creates no file), and truncates only when a failed commit left a tail. Native connections reuse one idle descriptor per lock name instead of reopening a lock file for every I/O lock and pin. In single-process probes on macOS arm64, a memory transaction fell from 0.31–0.38 ms to 0.14–0.15 ms and a durable Bun transaction from 1.16 ms to 0.50 ms; durable Node commits stay bound by their two flushes, which took about 3 ms each under Node on that host.
+
+VERIFIED: Behavior change: a transaction now conflicts only when a key it read changed, appeared or disappeared after its snapshot, instead of on any concurrent commit. Writers on disjoint keys no longer retry; write skew and point-read phantoms are still rejected, and a transaction that scanned falls back to the whole-database check. With four contending writers, retries fell from 1.5 to 2.1 per commit to none.
+
+VERIFIED: Commits queued on one handle publish as a group: one append, one generation flush and one head flush, with a revision and receipt per commit. A cancelled, conflicting or failing member is rejected alone. A transaction started while its handle's group holds the commit lock pins the last flushed head instead of waiting behind the group's flushes.
+
+VERIFIED: A forming commit group waits, at most half the previous group's publication time, for transactions on its handle that already hold a snapshot. Four transaction writers on one handle had alternated between groups of one and three members; in full groups a contended durable Node commit fell from 4.4 to 2.1 ms on macOS arm64, and a contended memory commit from 65 to 59 µs under Node and from 72 to 63 µs under Bun. A transaction that outlasts one wait is not waited for again.
+
+VERIFIED: defuss-dson is now 1.4.0, which writes the same frames as 1.3.0. In microbenchmarks of dbsonl's values, pages and manifests on macOS arm64 it encoded three to five times faster and decoded 2.5 to 6 times faster. Index pages and manifests use its `trusted` mode, which skips the per-property checks for plain data the engine built itself. On macOS arm64 a 24-entry leaf page encoded in 9 to 12 µs instead of 49 to 53 µs and decoded in 12 to 15 µs instead of 42 to 65 µs.
+
+VERIFIED: Index pages are written by a page-specific DSON writer with the same bytes as `encodeFrame` in trusted mode (checked on 2000 generated pages per test run), about 30% faster per page, and the page cache evicts by second chance instead of reordering on every hit. Together they took a contended memory commit from 59 to 49 µs under Node and from 63 to 56 µs under Bun in single-process probes.
+
+VERIFIED: Index edits and buffered appends run synchronously unless they need I/O, and native connections read the 8 KiB manifest with a blocking call; a cold manifest blocks the event loop for one 8 KiB read. A durable point read fell from 45 to 27 µs under Node and to about 33 µs under Bun in single-process probes.
+
+VERIFIED: In `make bench-redis` on macOS arm64, defuss-dbsonl now takes less time than Redis in 12 of 16 pairings, against 4 for 0.4.0. The single durable Node writes still lose, because each commit flushes twice and a flush took about 3 ms under Node there, and so do the 1000-write batches in memory, where encoding each value as its own DSON frame costs more than Redis's `JSON.stringify`. `docs/PERFORMANCE.md` has the table.
+
+VERIFIED: defuss-storage is now 0.3.1.
+
+VERIFIED: `make bench-redis` compares the current build with a throwaway loopback Redis pinned in `mise.toml`: point reads, 1000-write batches, `WATCH`/`MULTI`/`EXEC` transactions against `transaction()`, and four contending writers. Each engine's turn starts after a full garbage collection, because otherwise one engine's garbage was collected inside the other's timed work. `docs/PERFORMANCE.md` has the results.
+
 ## 0.4.0
 
 Breaking changes:

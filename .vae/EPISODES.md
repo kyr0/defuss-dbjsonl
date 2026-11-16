@@ -58,3 +58,48 @@ Wrap: EVERY lead becomes a test | .vae/VERIFY.py rule | one MEMORY line with BC,
 2026-11-15T17:14:05Z s=afa01d3f FINDING docs/index.html:#stack learn=none: One-off link.
 2026-11-15T17:15:10Z s=afa01d3f DONE fp=5ea587c862f4 cov=97.9% paths=docs/PERFORMANCE.md,docs/index.html
 2026-11-15T17:15:10Z s=afa01d3f FINDING docs/index.html:#performance learn=none: Label copy; Node.js embeds V8 and Bun embeds JavaScriptCore.
+2026-11-16T11:11:19Z s=85830ead FAIL prose,tests.e2e.1
+2026-11-16T11:43:21Z s=85830ead FAIL tests.e2e.1
+2026-11-16T11:46:21Z s=85830ead DONE fp=f666524387df cov=97.9% paths=CHANGELOG.md,Makefile,README.md,bun.lock(+14)
+2026-11-16T11:46:21Z s=85830ead FINDING scripts/bench-redis.ts:configGet dir learn=none: The guard itself is the mechanical check and runs on every make bench-redis.
+2026-11-16T11:46:21Z s=85830ead FINDING scripts/e2e.ts:WebKit pass learn=test: make e2e now drives both.
+2026-11-16T11:46:21Z s=85830ead FINDING scripts/e2e.ts:db-sheet wait learn=none: One-off test-code defect; the passing e2e run covers it.
+2026-11-16T11:46:21Z s=85830ead FINDING site/opfs.worker.ts:open learn=none: Whether a transient open failure caused the iPhone report is not established; no device was available.
+2026-11-16T11:46:21Z s=85830ead FINDING site/ARCH.md:9 L01 learn=none: Wording fix.
+2026-11-16T11:46:21Z s=85830ead FINDING CHANGELOG.md:7 P04 learn=none: Wording fix.
+2026-11-16T11:46:21Z s=85830ead FINDING docs/PERFORMANCE.md:46 B03 learn=none: Wording fix.
+2026-11-16T11:46:21Z s=85830ead FINDING docs/index.html:.table tbody .table-row:nth-child(even) learn=none: Root cause documented in the CSS comment; no rule kind can check rendered color.
+2026-11-16T11:46:21Z s=85830ead FINDING docs/index.html:.db-install .tab-list learn=none: Visual layout; e2e asserts no sideways page scroll, not label truncation.
+2026-11-16T11:46:21Z s=85830ead FINDING docs/index.html:.db-points learn=none: Visual layout.
+2026-11-16T11:46:21Z s=85830ead FINDING scripts/redis-worker.ts:connect learn=none: Comment only.
+2026-11-16T14:41:29Z s=85830ead FAIL tests.e2e.1
+2026-11-16T15:04:31Z s=85830ead DONE fp=8c3f1625d53b cov=98.1% paths=ARCH.md,CHANGELOG.md,Makefile,README.md(+24)
+2026-11-16T15:04:31Z s=85830ead FINDING src/core/tree.ts:BatchTree.finish, src/core/store.ts:commit learn=none: Only a tree-construction defect could trigger it; no real input produces an invalid page to test with.
+2026-11-16T15:04:31Z s=85830ead FINDING tests/native-performance.test.ts:descriptor test learn=test: The bound is the documented resource contract (docs/API.md, ARCH.md) and now runs on both platforms.
+2026-11-16T15:04:31Z s=85830ead FINDING src/server.ts:connect.retire learn=test: The descriptor test counts descriptors under the database root after five compact+collect cycles.
+2026-11-16T15:04:31Z s=85830ead FINDING docs/assets/demo.js, docs/assets/opfs.worker.js learn=test: The e2e byte comparison already catches it.
+2026-11-16T15:04:31Z s=85830ead FINDING gate tests.e2e.1 goto timeout learn=memory: CLI_GIST line: keep the turn open until bench-redis ends.
+2026-11-16T16:02:49Z s=85830ead DONE fp=e2c829653ed9 cov=97.8% paths=ARCH.md,CHANGELOG.md,Makefile,README.md(+28)
+2026-11-16T16:02:49Z s=85830ead FINDING src/core/store.ts:drain learn=none: A test that queued the commit from the cancelled member's rejection handler passed with and without the fix; the window depends on microtask order inside the co
+2026-11-16T16:02:49Z s=85830ead FINDING src/core/store.ts:close learn=none: Release after connection close was already handled by the release function; no deterministic failing case observed.
+2026-11-16T16:02:49Z s=85830ead FINDING src/core/codec.ts:frame learn=test: Byte comparison after the reset catches stale table entries.
+2026-11-16T16:02:49Z s=85830ead FINDING src/core/store.ts:awaitSiblings (removed) learn=none: Documented in docs/PERFORMANCE.md as a rejected experiment.
+2026-11-16T16:02:49Z s=85830ead FINDING src/core/codec.ts:allocate (removed) learn=none: Documented in docs/PERFORMANCE.md.
+2026-11-16T16:02:49Z s=85830ead FINDING tests/commit-groups.test.ts learn=none: Test code only.
+2026-11-16T16:02:49Z s=85830ead FINDING tests/codec.test.ts:generator learn=test: The generator exercises the edge directly.
+2026-11-16T17:42:02Z s=85830ead FAIL tests.e2e.1
+2026-11-16T17:59:39Z s=85830ead DONE fp=2a352924b1b4 cov=97.5% paths=ARCH.md,CHANGELOG.md,Makefile,README.md(+26)
+2026-11-16T17:59:39Z s=85830ead FINDING src/core/io.ts:publish, Appender.value; src/core/store.ts:encode learn=none: Cross-version reading stays gated by make e2e, which runs the 0.2.0 tarball with its own defuss-dson 1.3.0 concurrently with the new build on one database.
+2026-11-16T17:59:39Z s=85830ead FINDING validation/bench-redis-macos-arm64.json learn=none: Process-to-process variance under Bun; the isolated checked read loop was faster on 1.4.0 (8.6-15 vs 20-24 ms).
+2026-11-16T17:59:39Z s=85830ead FINDING .vae/CLI_GIST.md learn=memory: CLI_GIST now says a Monitor or background wait does not keep the turn open.
+2026-11-16T19:03:10Z s=85830ead DONE fp=3c3dc90aaa1f cov=97.7% paths=ARCH.md,CHANGELOG.md,Makefile,README.md(+28)
+2026-11-16T19:03:10Z s=85830ead FINDING src/core/store.ts:drain/gather learn=test: commit-groups.test.ts 'full groups' fails without gather (50 publications for 100 commits) and passes with it (<= 35).
+2026-11-16T19:03:10Z s=85830ead FINDING src/core/store.ts:gather bound learn=test: commit-groups.test.ts 'keeps its snapshot open' runs 20 puts while a transaction waits on a gate and asserts it is still pending afterwards.
+2026-11-16T19:03:10Z s=85830ead FINDING src/core/store.ts:drain readHead learn=none: Equivalent outcome by code reading; retries in publishGroup still pass no head and re-read it.
+2026-11-16T19:03:10Z s=85830ead FINDING src/core/store.ts:cached/remember learn=test: mvcc.test.ts still bounds cachePages and cacheBytes at 2 pages and 1024 bytes.
+2026-11-16T19:03:10Z s=85830ead FINDING src/core/page.ts learn=test: page.test.ts; make e2e has 0.2.0 on DSON 1.3.0 read the frames concurrently.
+2026-11-16T19:03:10Z s=85830ead FINDING scripts/redis-worker.ts:collect learn=none: Documented in docs/PERFORMANCE.md: it turned Bun's memory batch from 0.47 to 1.61 of Redis's time.
+2026-11-16T19:03:10Z s=85830ead FINDING tree.ts split threshold (probe, reverted) learn=none: Documented as rejected in docs/PERFORMANCE.md.
+2026-11-16T19:03:10Z s=85830ead FINDING .vae/CLI_GIST.md learn=memory: CLI_GIST line 'redis probes'.
+2026-11-16T19:37:01Z s=85830ead DONE fp=43ef50f1b78a cov=97.7% paths=ARCH.md,CHANGELOG.md,Makefile,README.md(+28)
+2026-11-16T19:37:01Z s=85830ead FINDING package.json:version learn=none: Version bump only; no code path changed.

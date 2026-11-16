@@ -1,6 +1,6 @@
 # DBSONL format 2
 
-VERIFIED: The disk format uses DSON 1.3.0 sequence frames. Each frame has a 16-byte DSQ header with length, header CRC32C and payload CRC32C. Payloads encode values and references locally to that frame. DBSONL adds no JSON/base64 layer.
+VERIFIED: The disk format uses DSON 1.3.0 sequence frames. defuss-dson 1.4.0 writes the same bytes as 1.3.0, so builds on either version read each other's files. Each frame has a 16-byte DSQ header with length, header CRC32C and payload CRC32C. Payloads encode values and references locally to that frame. DBSONL adds no JSON/base64 layer.
 
 ## Files
 
@@ -49,11 +49,13 @@ VERIFIED: An update appends a value, then edits private copies of the leaf and a
 ## Commit and maintenance sequence
 
 1. Acquire commit lock and read the latest valid head.
-2. Validate expected revision, if supplied.
+2. Check each queued commit in order: its expected revision, if supplied, and the revisions of a transaction's read keys. Each accepted commit takes the next revision.
 3. Truncate only bytes after that head's committed end.
 4. Append values and copied index paths; drain the bounded writer buffer, then flush the generation.
-5. Write and flush the alternate head slot; sync native directory metadata.
-6. Release locks and return the revision receipt.
+5. Write and flush the alternate head slot. Both files already exist, so a commit needs no directory sync; creation and compaction sync the directory before the first head refers to a new file.
+6. Release locks and return each commit its revision receipt.
+
+VERIFIED: One publication can therefore cover several revisions. Records carry the revision of the commit that wrote them, and the head carries the last one; intermediate revisions are never published as heads. Readers of any version see consecutive heads as before.
 
 VERIFIED: Failure before step 5 cannot publish a partial batch. Failure during or after step 5 can have an uncertain outcome. Publication does not wait for older snapshots; their roots refer only to immutable earlier frames.
 

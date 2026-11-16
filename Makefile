@@ -5,13 +5,13 @@ BUN ?= bun
 export
 VAE := python3 tmp/vae-tooling/plugin/scripts/vae.py
 
-.PHONY: help setup build site dev lint test coverage e2e verify bench bench-scale metrics vae-setup vae prose release start stop restart status log
+.PHONY: help setup build site dev lint test coverage e2e verify bench bench-scale bench-redis metrics vae-setup vae prose release start stop restart status log
 help: ## List available targets.
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "%-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
-setup: ## Install pinned dependencies, Chromium and the VAE runtime.
+setup: ## Install pinned dependencies (Node, Bun, Redis), Chromium, WebKit and the VAE runtime.
 	@if command -v mise >/dev/null 2>&1; then mise install; fi
 	$(BUN) install --frozen-lockfile
-	$(BUN) x playwright install chromium
+	$(BUN) x playwright install chromium webkit
 	$(BUN) scripts/vae.ts
 build: ## Build ESM, CommonJS and declarations.
 	$(BUN) run build
@@ -28,13 +28,15 @@ test: ## Test actual memory and native storage, replay and recovery.
 	$(BUN) run test
 coverage: ## Measure production-code coverage with enforced thresholds.
 	$(BUN) run coverage
-e2e: build ## Install the tarball and test Node, Bun and a real Chromium worker.
+e2e: build ## Install the tarball and test Node, Bun, real Chromium workers and the website in WebKit at iPhone size.
 	$(BUN) scripts/e2e.ts
 verify: lint test coverage e2e ## Execute the complete automated verification suite.
 bench: build ## Compare v0.2.0, v0.3.0 and the current build across Node/Bun, native async/sync and memory.
 	$(BUN) scripts/bench.ts
 bench-scale: build ## Compare the three builds on 10000-record native async workloads, three measured rounds.
 	$(BUN) scripts/bench.ts --scale
+bench-redis: build ## Compare the current build with a throwaway loopback Redis (pinned in mise.toml): reads, batches and transactions.
+	$(BUN) scripts/bench-redis.ts
 metrics: ## Print the last benchmark report.
 	@cat output/bench.json
 vae-setup: ## Extract the pinned VAE runtime without network access.

@@ -79,24 +79,59 @@ export class BatchTree {
   private root: Link | null;
   private count: number;
   private loadedBytes = 0;
-  constructor(private readonly writer: Appender, root: Ref | null, count: number, private readonly byteBudget: number) { this.root = root; this.count = count; }
-  private async editable(link: Link | null): Promise<DirtyPage> {
+  /** Live key count after the edits applied so far. */
+  get size(): number { return this.count; }
+  /** Pages this batch appended, for the caller to cache once the root is published. */
+  readonly written: { ref: Ref; page: Page }[] = [];
+  /** cached returns an already validated committed page, or undefined to read it through the writer. */
+  constructor(private readonly writer: Appender, root: Ref | null, count: number, private readonly byteBudget: number, private readonly cached: (ref: Ref) => Page | undefined = () => undefined) { this.root = root; this.count = count; }
+  /** Committed pages on the next edit's path, found by missing(); each becomes a dirty copy in editable(). */
+  private readonly fetched = new Map<Ref, Page>();
+  private editable(link: Link | null): DirtyPage {
     if (!link) return { kind: 'leaf', entries: [] };
     if ('kind' in link) return link;
     if (this.loadedBytes + link.byteLength > this.byteBudget) throw new DbsonlError('LIMIT_EXCEEDED', 'Dirty index paths exceed the transaction byte budget.');
     this.loadedBytes += link.byteLength;
-    const page = validatePage(await this.writer.read(link), link);
+    // Committed pages are immutable, so a cached copy equals a reread; editing copies its arrays.
+    const page = this.fetched.get(link)!; this.fetched.delete(link);
     return page.kind === 'leaf' ? { kind: 'leaf', entries: page.entries.slice() } : { kind: 'branch', children: page.children.slice() };
+  }
+  /** Collect the committed pages on key's path; return the first one that needs a read, if any. */
+  private missing(key: string): Ref | undefined {
+    let link: Link | null = this.root;
+    for (let depth = 0; link; depth++) {
+      if (depth > 64) corrupt('Index depth exceeds the format safety bound.');
+      let page: Page | DirtyPage;
+      if ('kind' in link) page = link;
+      else {
+        const known = this.fetched.get(link) ?? this.cached(link);
+        if (!known) return link;
+        this.fetched.set(link, known); page = known;
+      }
+      if (page.kind === 'leaf') return undefined;
+      // The same child edit() descends into.
+      link = (page.children as { ref: Link }[])[Math.min(page.children.length - 1, lower(page.children as { max: string }[], key, item => item.max))]!.ref;
+    }
+    return undefined;
   }
   private route(page: DirtyPage): Route {
     const max = page.kind === 'leaf' ? page.entries.at(-1)!.key : page.children.at(-1)!.max;
     const count = page.kind === 'leaf' ? page.entries.length : page.children.reduce((sum, item) => sum + item.count, 0);
     natural(count, 'key count'); return { max, count, ref: page };
   }
-  async apply(key: string, entry: Entry | undefined): Promise<void> {
-    const edit = async (link: Link | null, depth: number): Promise<Route[]> => {
+  /**
+   * Synchronous when every page on the key's path is dirty or cached, the common case; a promise only
+   * when a page must be read. A 1000-write batch awaited about five times per write before.
+   */
+  apply(key: string, entry: Entry | undefined): void | Promise<void> {
+    const ref = this.missing(key);
+    if (!ref) { this.edit(key, entry); return; }
+    return this.writer.read<unknown>(ref).then(value => { this.fetched.set(ref, validatePage(value, ref)); return this.apply(key, entry); });
+  }
+  private edit(key: string, entry: Entry | undefined): void {
+    const edit = (link: Link | null, depth: number): Route[] => {
       if (depth > 64) corrupt('Index depth exceeds the format safety bound.');
-      const page = await this.editable(link);
+      const page = this.editable(link);
       if (page.kind === 'leaf') {
         const at = lower(page.entries, key, item => item.key), exists = page.entries[at]?.key === key;
         if (entry) page.entries.splice(at, exists ? 1 : 0, entry); else if (exists) page.entries.splice(at, 1);
@@ -107,7 +142,7 @@ export class BatchTree {
         }
       } else {
         const at = Math.min(page.children.length - 1, lower(page.children, key, item => item.max));
-        page.children.splice(at, 1, ...await edit(page.children[at]!.ref, depth + 1));
+        page.children.splice(at, 1, ...edit(page.children[at]!.ref, depth + 1));
         if (!page.children.length) return [];
         if (page.children.length > FANOUT) {
           const right = page.children.splice(Math.ceil(page.children.length / 2));
@@ -116,7 +151,7 @@ export class BatchTree {
       }
       return [this.route(page)];
     };
-    const changed = await edit(this.root, 0);
+    const changed = edit(this.root, 0);
     if (!changed.length) { this.root = null; this.count = 0; return; }
     const result = changed.length === 1 ? changed[0]! : this.route({ kind: 'branch', children: changed });
     this.root = result.ref; this.count = result.count;
@@ -133,7 +168,10 @@ export class BatchTree {
         for (const child of link.children) children.push({ ...child, ref: await persist(child.ref) });
         page = { kind: 'branch', children };
       }
-      return this.writer.value(page, true);
+      const ref = await this.writer.value(page, true);
+      // Validated before publication: a page readers would reject must fail the commit, not enter the cache.
+      this.written.push({ ref, page: validatePage(page, ref) });
+      return ref;
     };
     return { root: this.root ? await persist(this.root) : null, count: this.count };
   }

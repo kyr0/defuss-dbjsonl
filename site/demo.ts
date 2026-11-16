@@ -97,7 +97,8 @@ async function values(): Promise<void> {
     const body = $('#types-out');
     body.replaceChildren(...rows.map(([key, read, ok]) => {
       const row = document.createElement('tr');
-      for (const cell of [key, read, ok ? 'kept' : 'lost']) { const td = document.createElement('td'); td.textContent = cell; row.append(td); }
+      row.className = 'table-row';
+      for (const cell of [key, read, ok ? 'kept' : 'lost']) { const td = document.createElement('td'); td.className = 'table-cell'; td.textContent = cell; row.append(td); }
       row.dataset.ok = String(ok);
       return row;
     }));
@@ -111,15 +112,40 @@ function persistence(): void {
     status.textContent = 'This browser lacks OPFS or Web Locks, so the persistent demo cannot run here.';
     return;
   }
-  const worker = new Worker(new URL('./opfs.worker.js', import.meta.url), { type: 'module' });
-  const send = (op: 'read' | 'increment' | 'reset') => worker.postMessage({ op });
-  worker.onmessage = ({ data }) => {
-    if (!data.ok) { status.textContent = `The worker reported ${data.error}.`; return; }
-    text('#persist-count', data.counter); text('#persist-rev', data.revision);
-    status.textContent = data.retries ? `Committed after ${data.retries} conflict retries with another tab.` : 'Stored in this origin\'s private file system.';
-    document.documentElement.dataset.persistReady = '';
+  // UNKNOWN: why the demo stopped answering on an iPhone after a delete; desktop WebKit and Chromium never hang.
+  // A worker that leaves a request unanswered is replaced: ending it releases its Web Locks and OPFS handles,
+  // and a commit it interrupted is either published or invisible, so the new worker reads a consistent counter.
+  const silenceMs = 5000;
+  let worker: Worker;
+  let pending = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let notice = '';
+  let replaced = false;
+  const watch = () => { clearTimeout(timer); timer = pending ? setTimeout(restart, silenceMs) : undefined; };
+  const send = (op: 'read' | 'increment' | 'reset') => { pending++; worker.postMessage({ op }); watch(); };
+  const start = () => {
+    worker = new Worker(new URL('./opfs.worker.js', import.meta.url), { type: 'module' });
+    worker.onmessage = ({ data }) => {
+      pending = Math.max(0, pending - 1); watch();
+      if (!data.ok) { status.textContent = `The worker reported ${data.error}${data.detail ? ` (${data.detail})` : ''}.`; return; }
+      replaced = false;
+      text('#persist-count', data.counter); text('#persist-rev', data.revision);
+      status.textContent = notice || (data.retries ? `Committed after ${data.retries} conflict retries.` : 'Stored in this origin\'s private file system.');
+      notice = '';
+      document.documentElement.dataset.persistReady = '';
+    };
+    worker.onerror = event => { pending = 0; watch(); status.textContent = `The worker failed: ${event.message}`; };
   };
-  worker.onerror = event => { status.textContent = `The worker failed to start: ${event.message}`; };
+  // One replacement per silence: a second silent worker means something outside this page holds the database.
+  function restart(): void {
+    worker.terminate(); pending = 0; start();
+    // The next click goes to the fresh worker; the page itself stops retrying.
+    if (replaced) { notice = ''; status.textContent = 'The replacement worker did not answer either; close other tabs of this site, then reload.'; return; }
+    replaced = true;
+    status.textContent = notice = `The worker did not answer for ${silenceMs / 1000} s, so the page replaced it.`;
+    send('read');
+  }
+  start();
   $('#persist-inc').addEventListener('click', () => send('increment'));
   $('#persist-reset').addEventListener('click', () => send('reset'));
   send('read');

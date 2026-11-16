@@ -97,7 +97,10 @@ export async function createFileBackend(root: string, options?: FileStorageOptio
   backend.connect = name => {
     validateName(name);
     const readers = new Map<string, { file: Promise<FileHandle>; handle?: FileHandle; users: number; failed: boolean }>();
-    let idleCommit: FileHandle | undefined;
+    // One idle, unlocked descriptor per lock name. Reopening a lock file cost about 60 µs per lock on
+    // macOS, three times per transaction. Simultaneous owners still get distinct open file
+    // descriptions, otherwise flock would merge them.
+    const idle = new Map<string, FileHandle>();
     let closed = false;
     const commitName = `commit-${name}`;
     const local = createMemoryCoordinator();
@@ -106,13 +109,11 @@ export async function createFileBackend(root: string, options?: FileStorageOptio
       const entry = readers.get(filename);
       if (entry && !entry.users) { readers.delete(filename); await (await entry.file).close(); }
     };
-    const acquireCommit = async (shared: boolean, signal: CancellationSignal | undefined, tryOnly: boolean): Promise<Release | undefined> => {
+    const acquireNative = async (target: string, shared: boolean, signal: CancellationSignal | undefined, tryOnly: boolean): Promise<Release | undefined> => {
       abort(signal);
-      // Only an idle, unlocked descriptor can be reused. Simultaneous owners
-      // need distinct open file descriptions, otherwise flock would merge them.
-      let file = idleCommit; idleCommit = undefined;
+      let file = idle.get(target); idle.delete(target);
       if (!file) {
-        file = await open(lockPath(commitName), constants.O_CREAT | constants.O_RDWR | (constants.O_NOFOLLOW ?? 0), 0o600);
+        file = await open(lockPath(target), constants.O_CREAT | constants.O_RDWR | (constants.O_NOFOLLOW ?? 0), 0o600);
         try { if (!(await file.stat()).isFile()) throw new TypeError('Lock path is not a regular file.'); }
         catch (error) { await file.close(); throw error; }
       }
@@ -126,7 +127,10 @@ export async function createFileBackend(root: string, options?: FileStorageOptio
             return async () => {
               if (released) return; released = true;
               try { native.lockSync(handle.fd, native.Lock.Unlock); } catch (error) { await handle.close(); throw error; }
-              if (!closed && !idleCommit) idleCommit = handle; else await handle.close();
+              if (closed || idle.has(target)) { await handle.close(); return; }
+              idle.set(target, handle);
+              // Pins of collected generations are never taken again; keep the idle set small.
+              for (const [old, oldHandle] of idle) { if (idle.size <= 8) break; idle.delete(old); await oldHandle.close(); }
             };
           }
           if (tryOnly) { await handle.close(); return undefined; }
@@ -140,16 +144,22 @@ export async function createFileBackend(root: string, options?: FileStorageOptio
         ...backend.coordinator,
         async acquire(target, shared = false, signal, tryOnly = false) {
           check();
-          if (target !== commitName) return backend.coordinator.acquire(target, shared, signal, tryOnly);
+          // Only the commit lock queues locally first: it is the one that same-process writers contend for.
+          if (target !== commitName) return acquireNative(target, shared, signal, tryOnly);
           const releaseLocal = await local.acquire(target, shared, signal, tryOnly);
           if (!releaseLocal) return undefined;
           try {
-            const release = await acquireCommit(shared, signal, tryOnly);
+            const release = await acquireNative(target, shared, signal, tryOnly);
             if (!release) { await releaseLocal(); return undefined; }
             return async () => { try { await release(); } finally { await releaseLocal(); } };
           } catch (error) { await releaseLocal(); throw error; }
         },
-        async retire(filename) { await releaseReader(filename); await backend.coordinator.retire(filename); },
+        async retire(filename) {
+          await releaseReader(filename);
+          // A descriptor of an unlinked lock file would lock an inode no other process can open.
+          for (const target of [`pin-${filename}`, `io-${filename}`]) { const handle = idle.get(target); idle.delete(target); await handle?.close(); }
+          await backend.coordinator.retire(filename);
+        },
       },
       async read(filename, offset, length) {
         check();
@@ -175,7 +185,10 @@ export async function createFileBackend(root: string, options?: FileStorageOptio
           const bytes = new Uint8Array(length);
           // A manifest size check runs beside the first read. It detects oversized
           // files without a second sequential EOF read on the common 8192-byte head.
-          const fileSize = filename === `${name}.head` ? synchronous ? fstatSync(handle.fd).size :
+          // The 8 KiB manifest is read on every operation and stays in the page cache, where a blocking read
+          // took 0.4 to 0.6 µs against 9 to 18 µs for a thread-pool round trip; values keep the configured mode.
+          const blocking = synchronous || filename === `${name}.head`;
+          const fileSize = filename === `${name}.head` ? blocking ? fstatSync(handle.fd).size :
             new Promise<number>((resolve, reject) => fstat(handle.fd, (error, stat) => error ? reject(error) : resolve(stat.size))) : undefined;
           let used = 0;
           let end = length;
@@ -183,7 +196,7 @@ export async function createFileBackend(root: string, options?: FileStorageOptio
             const size = Math.min(readChunk, length - used);
             // Callback fs avoids FileHandle's per-read Promise/ref bookkeeping;
             // the connection's users counter owns descriptor lifetime instead.
-            const pending = synchronous ? readSync(handle.fd, bytes, used, size, offset + used) :
+            const pending = blocking ? readSync(handle.fd, bytes, used, size, offset + used) :
               new Promise<number>((resolve, reject) => read(handle.fd, bytes, used, size, offset + used, (error, count) => error ? reject(error) : resolve(count)));
             let count: number;
             if (fileSize instanceof Promise) {
@@ -217,7 +230,8 @@ export async function createFileBackend(root: string, options?: FileStorageOptio
     return { backend: scoped, close: async () => {
       if (closed) return; closed = true;
       const handles = [...readers.values()].map(entry => entry.file); readers.clear();
-      if (idleCommit) { handles.push(Promise.resolve(idleCommit)); idleCommit = undefined; }
+      for (const handle of idle.values()) handles.push(Promise.resolve(handle));
+      idle.clear();
       await Promise.all(handles.map(async handle => (await handle).close()));
     } };
   };

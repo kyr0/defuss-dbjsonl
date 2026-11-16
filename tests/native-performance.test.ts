@@ -2,6 +2,7 @@
 import { test, expect, beforeAll } from 'vitest';
 import { mkdtemp, mkdir, rm, readdir, readlink, open, symlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { encodeFrame } from 'defuss-dson/sequence';
 import { createFileBackend } from '../src/server.js';
 import { openDbsonl } from '../src/index.js';
@@ -90,9 +91,11 @@ test('native known-length reads bound allocations, detect mismatched lengths and
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test.skipIf(process.platform !== 'linux')('native descriptor reuse is bounded and closes after failed opens and database close', async () => {
+test.skipIf(process.platform !== 'linux' && process.platform !== 'darwin')('native descriptor reuse is bounded and closes after failed opens and database close', async () => {
   const root = await mkdtemp(resolve('tmp/fast-fds-'));
   const descriptors = async () => {
+    // macOS has no /proc; lsof lists this process's open paths, one 'n' line each.
+    if (process.platform === 'darwin') return execFileSync('lsof', ['-a', '-p', String(process.pid), '-Fn'], { encoding: 'utf8' }).split('\n').filter(line => line.startsWith(`n${root}`)).length;
     let count = 0;
     for (const id of await readdir('/proc/self/fd')) {
       try { if ((await readlink(`/proc/self/fd/${id}`)).startsWith(root)) count++; } catch { /* Other concurrent tests close descriptors. */ }
@@ -106,9 +109,11 @@ test.skipIf(process.platform !== 'linux')('native descriptor reuse is bounded an
     expect(await descriptors()).toBe(0);
     const db = await openDbsonl(backend, 'bounded', { create: true }); await db.put('x', 1);
     for (let i = 0; i < 32; i++) await db.get('x');
-    expect(await descriptors()).toBeLessThanOrEqual(3);
+    // Two read descriptors (head, generation) plus one idle lock descriptor each for commit, the head's
+    // and the generation's io lock, and the generation pin.
+    expect(await descriptors()).toBeLessThanOrEqual(6);
     for (let i = 0; i < 5; i++) { await db.compact(); await db.collect(); await db.get('x'); }
-    expect(await descriptors()).toBeLessThanOrEqual(3);
+    expect(await descriptors()).toBeLessThanOrEqual(6);
     await db.close(); expect(await descriptors()).toBe(0);
     await symlink(resolve(root, 'bounded.head'), resolve(root, 'linked.head'));
     await expect(openDbsonl(backend, 'linked')).rejects.toMatchObject({ code: 'UNSUPPORTED' });

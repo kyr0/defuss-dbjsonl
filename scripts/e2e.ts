@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { build, transform } from 'esbuild';
-import { chromium } from 'playwright';
+import { chromium, devices, webkit } from 'playwright';
 import { createHash } from 'node:crypto';
 
 const root = process.cwd();
@@ -117,17 +117,56 @@ try {
   if (Number(await page.textContent('#persist-count')) !== before + 1) throw new Error('Website counter did not survive a reload.');
   await page.click('#persist-reset');
   await page.waitForFunction(() => document.querySelector('#persist-count')?.textContent === '0');
+  // The counter keeps working after a delete, where the demo was reported to stop on an iPhone.
+  await page.click('#persist-inc');
+  await page.waitForFunction(() => document.querySelector('#persist-count')?.textContent === '1');
+  // A worker stuck behind a lock it cannot get is replaced after 5 s; the blocked increment never commits.
+  await page.evaluate(() => new Promise<void>(held => {
+    void navigator.locks.request('defuss-dbsonl:dbsonl-site-demo:commit-visits', () => new Promise<void>(release => { (window as unknown as { release: () => void }).release = release; held(); }));
+  }));
+  await page.click('#persist-inc');
+  await page.waitForFunction(() => document.querySelector('#persist-status')?.textContent?.includes('did not answer'), undefined, { timeout: 9000 });
+  await page.evaluate(() => (window as unknown as { release: () => void }).release());
+  await page.click('#persist-inc');
+  await page.waitForFunction(() => document.querySelector('#persist-count')?.textContent === '2');
   // The shader runtime comes from a pinned, integrity-checked CDN file; three effects must have mounted their canvas.
   await page.waitForFunction(() => document.querySelectorAll('.shader canvas').length === 3, undefined, { timeout: 30000 });
   await page.click('#tab-browser');
   if (await page.isHidden('#use-browser')) throw new Error('Website install tabs did not switch.');
   if (errors.length) throw new Error(`Website errors: ${errors.join('; ')}`);
+  // Safari's engine at iPhone size: OPFS needs a persistent profile there, and the page must not scroll sideways.
+  const profile = resolve('tmp/webkit-profile'); await rm(profile, { recursive: true, force: true });
+  const phone = await webkit.launchPersistentContext(profile, { ...devices['iPhone 15'] });
+  try {
+    const mobile = phone.pages()[0] ?? await phone.newPage();
+    const mobileErrors: string[] = [];
+    mobile.on('pageerror', error => mobileErrors.push(`${error.message} ${error.stack ?? ''}`));
+    await mobile.goto(`http://127.0.0.1:${(server.address() as { port: number }).port}/site/`);
+    await mobile.waitForSelector('html[data-demo-ready]', { timeout: 30000 });
+    await mobile.waitForSelector('html[data-persist-ready]', { timeout: 30000 });
+    for (const [button, count] of [['#persist-inc', '1'], ['#persist-reset', '0'], ['#persist-inc', '1']] as const) {
+      await mobile.tap(button);
+      await mobile.waitForFunction(value => document.querySelector('#persist-count')?.textContent === value, count);
+    }
+    // The menu button and its sheet exist only at phone width.
+    await mobile.tap('.db-menu');
+    await mobile.waitForSelector('#db-sheet[open]');
+    await mobile.tap('#db-sheet a[href="#performance"]');
+    await mobile.waitForSelector('#db-sheet', { state: 'hidden' });
+    await mobile.tap('#types-run');
+    await mobile.waitForFunction(() => document.querySelectorAll('#types-out tr[data-ok="true"]').length === 5);
+    const layout = await mobile.evaluate(() => ({ page: document.documentElement.scrollWidth, viewport: document.documentElement.clientWidth }));
+    if (layout.page > layout.viewport) throw new Error(`Website scrolls sideways on a phone: ${layout.page} px content in a ${layout.viewport} px viewport.`);
+    await mobile.screenshot({ path: resolve(output, 'site-iphone.png'), fullPage: true });
+    if (mobileErrors.length) throw new Error(`Website errors in WebKit: ${mobileErrors.join('; ')}`);
+    Object.assign(result, { webkit: `${webkit.name()} ${phone.browser()?.version() ?? ''}`.trim(), phone: 'iPhone 15 viewport: OPFS add, delete, add; menu sheet; DSON demo; no sideways page scroll' });
+  } finally { await phone.close(); }
   // The committed bundles must equal a fresh build from the packed package, or `make site` was skipped after a change.
   for (const file of ['demo.js', 'opfs.worker.js']) {
     if (!(await readFile(resolve(output, 'site/assets', file))).equals(await readFile(resolve('docs/assets', file)))) throw new Error(`docs/assets/${file} is stale; run make site.`);
   }
-  Object.assign(result, { website: 'snapshot, conflict, DSON and OPFS demos; reload persistence; install tabs' });
+  Object.assign(result, { website: 'snapshot, conflict, DSON and OPFS demos; reload persistence; delete then add; silent worker replaced; install tabs' });
   const report = { package: `defuss-dbsonl@${version}`, generatedAt: new Date().toISOString(), runtimes, v2, commonjs: ['Node', 'Bun'], declarations: 'no DOM or Node ambient types', browser: { name: 'Chromium', version: browser.version(), ...result } };
   await writeFile(resolve(output, 'e2e.json'), JSON.stringify(report, null, 2) + '\n');
-  console.log(`Node, Bun, ESM, CommonJS, declaration checks and Chromium ${browser.version()} passed.`);
+  console.log(`Node, Bun, ESM, CommonJS, declaration checks, Chromium ${browser.version()} and WebKit at iPhone size passed.`);
 } finally { await browser?.close(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }

@@ -1,6 +1,6 @@
-# defuss-dbsonl 0.4.0
+# defuss-dbsonl 0.5.0
 
-Transactional key-value storage for Node.js, Bun and browser workers. Values are DSON, so dates, binary views, bigint, `undefined` and cyclic references survive storage. It is built on [defuss-dson](https://dson.defuss.org) 1.3.0 and [defuss-storage](https://storage.defuss.org) 0.3.0 and ships TypeScript declarations with ESM and CommonJS builds. It is designed as the backing store and API of [defuss-dataview](https://dataview.defuss.org), which adds filters, sorting and paging for table and tree grids. Project website: [docs/index.html](docs/index.html).
+Transactional key-value storage for Node.js, Bun and browser workers. Values are DSON, so dates, binary views, bigint, `undefined` and cyclic references survive storage. It is built on [defuss-dson](https://dson.defuss.org) 1.4.0 and [defuss-storage](https://storage.defuss.org) 0.3.1 and ships TypeScript declarations with ESM and CommonJS builds. It is designed as the backing store and API of [defuss-dataview](https://dataview.defuss.org), which adds filters, sorting and paging for table and tree grids. Project website: [docs/index.html](docs/index.html).
 
 VERIFIED: A database is a persistent copy-on-write B+tree with immutable snapshots, atomic batches, optimistic serializable transactions, compaction and process-safe coordination. Opening reads two small manifest slots instead of replaying a log, and readers never block writers.
 
@@ -8,7 +8,7 @@ VERIFIED: A database is a persistent copy-on-write B+tree with immutable snapsho
 
 ```sh
 make release
-bun add ./validation/defuss-dbsonl-0.4.0.tgz
+bun add ./validation/defuss-dbsonl-0.5.0.tgz
 ```
 
 `make release` builds the tarball locally; registry publication is a separate step.
@@ -41,7 +41,7 @@ try {
 }
 ```
 
-The transaction callback runs once. A concurrent commit makes it fail with `CONFLICT` instead of retrying, because a retry would repeat any side effects in your callback. Retry explicitly where that is safe. `batch()` accepts concurrent writers and serializes their publication. `ifRevision` gives compare-and-swap for changes prepared outside a transaction.
+The transaction callback runs once. A concurrent commit that changed a key the callback read makes it fail with `CONFLICT` instead of retrying, because a retry would repeat any side effects in your callback; after a scan, any concurrent commit does. Retry explicitly where that is safe. Concurrent batches and transactions on one handle publish together: one write and one pair of flushes for the queued group, while each keeps its own revision and receipt. `ifRevision` gives compare-and-swap for changes prepared outside a transaction.
 
 Memory storage needs no platform entry:
 
@@ -80,11 +80,11 @@ Each row names the obvious alternative, the reason it was not taken and the cost
 
 | Concern | Plausible alternative | Chosen | Why | Cost |
 | --- | --- | --- | --- | --- |
-| Finding keys | In-memory key map rebuilt by replaying a log | Persistent B+tree, fanout 32, bounded LRU page cache | Memory does not grow with key count and open needs no replay | Uncached point reads perform disk I/O |
+| Finding keys | In-memory key map rebuilt by replaying a log | Persistent B+tree, fanout 32, bounded page cache | Memory does not grow with key count and open needs no replay | Uncached point reads perform disk I/O |
 | Readers versus writers | Read locks that block commits | Immutable roots and shared generation pins | A slow reader cannot stall writers | Old generations stay on disk until readers close |
 | Atomic publication | Write a new file, then rename it | Two checksummed head slots, written alternately | OPFS and Storage expose no uniform atomic rename | Every commit writes one 4 KiB slot |
-| Multiple writers | One owning process | OS whole-file locks or Web Locks, held per commit | Independent processes and workers can share one database | Commits still serialize to keep one revision order |
-| Transactions | Per-key conflict detection | Whole-database revision check | Rules out write skew and range phantoms without read-set tracking | Writers touching disjoint keys can still conflict |
+| Multiple writers | One owning process | OS whole-file locks or Web Locks, held per commit group | Independent processes and workers can share one database | Commits still serialize to keep one revision order |
+| Transactions | One revision check for the whole database | Each point read rechecked at commit; the whole-database check after a scan | Writers on disjoint keys commit without retrying, and write skew and phantoms are still ruled out | A transaction keeps the revision of every key it read, up to `maxTransactionOperations` keys, then falls back to the whole-database check |
 | Space reuse | In-place updates or a background vacuum | Explicit `compact()` and `collect()` | No hidden I/O; the application chooses when to pay | Compaction needs disk space for one live copy |
 | Stale locks | Lock files that expire after a timeout | Kernel locks released on process death | A paused process never loses ownership to a second writer | Requires the native addon on servers |
 
@@ -92,11 +92,11 @@ VERIFIED: `compact()` lets writers continue while it copies and returns `CONFLIC
 
 ## Guarantees and boundaries
 
-VERIFIED: A published root makes a whole batch visible at once. Values and index pages are flushed before a head slot is written, and native factories also sync directory metadata. Two checksummed slots survive an interrupted write of either one. A writer reuses any unpublished tail left by a failed commit. Published corruption fails validation; nothing repairs data automatically, because a guessed repair can turn damage into silent data loss.
+VERIFIED: A published root makes a whole batch visible at once. Values and index pages are flushed before a head slot is written. Native factories also sync the directory after creating or removing a file, before any head refers to it; a commit only appends to and overwrites existing files. Two checksummed slots survive an interrupted write of either one. A writer reuses any unpublished tail left by a failed commit. Published corruption fails validation; nothing repairs data automatically, because a guessed repair can turn damage into silent data loss.
 
 VERIFIED: Native locking uses `@lickle/lock` 0.0.1, which takes whole-file `flock`/`LockFileEx` locks through a Node-API addon. Version 0.3.0 was tested on Linux x64; on 2026-11-14 the full suite, including process termination and the packed-package run, also passed on macOS arm64. Both used Node 24.22.1 and Bun 1.4.3. Chromium workers were tested with real OPFS, directory handles and Web Locks. Memory backends coordinate only clients that share one backend object.
 
-VERIFIED: No test run has exercised power cuts, network filesystems, Windows, Firefox or WebKit, so their behavior is unknown. The addon ships binaries for Linux x64 glibc, macOS x64/arm64 and Windows x64. The native factory refuses to start where directory sync is unsupported, rather than silently promising less durability. OPFS has no directory-sync API and reports `durability: 'file'`; memory reports `'memory'`. There is no distributed consensus, encryption or protection against hostile writers.
+VERIFIED: No test run has exercised power cuts, network filesystems, Windows or Firefox, so their behavior is unknown. WebKit has run only the website demos, including the OPFS counter, in Playwright's WebKit build at iPhone size; the browser test suite runs in Chromium. The addon ships binaries for Linux x64 glibc, macOS x64/arm64 and Windows x64. The native factory refuses to start where directory sync is unsupported, rather than silently promising less durability. OPFS has no directory-sync API and reports `durability: 'file'`; memory reports `'memory'`. There is no distributed consensus, encryption or protection against hostile writers.
 
 Resource budgets cap retained engine work. The page cache is bounded by encoded bytes and page count, independent of key count. Decoded values, active traversal paths, caller-held values, snapshots and the memory adapter's stored bytes are outside that budget. [API](docs/API.md) lists the defaults and error codes.
 
@@ -109,15 +109,16 @@ Version 0.4.0 renamed the native entry from `defuss-dbsonl/node` to `defuss-dbso
 ## Develop and verify
 
 ```sh
-make setup    # pinned Node/Bun via mise, dependencies, Chromium, VAE runtime
+make setup    # pinned Node/Bun/Redis via mise, dependencies, Chromium, WebKit, VAE runtime
 make verify   # lint, tests, coverage, packed-package e2e
 make bench    # matched v0.2 versus current benchmarks
+make bench-redis  # current build versus a throwaway loopback Redis, run as mise exec -- make bench-redis
 make dev      # rebuild the website demos and serve docs/ on 127.0.0.1:3000
 make vae      # verification, review and documentation gate
 make release  # tarball, source ZIP and checksums; never publishes or commits
 ```
 
-VERIFIED: `make verify` runs strict type checks, lint, real-storage tests, coverage thresholds and a packed-package suite on Node, Bun and Chromium. That suite runs mixed Node/Bun processes on both 0.2.0 and the current build, kills writers mid-batch and runs concurrent browser workers. `make release` packages only after the pinned defuss-vae 0.9.0 gate passes for the current source fingerprint. `make` lists every target; `.env.example` documents the browser executable overrides.
+VERIFIED: `make verify` runs strict type checks, lint, real-storage tests, coverage thresholds and a packed-package suite on Node, Bun and Chromium, plus the website in WebKit at iPhone size. That suite runs mixed Node/Bun processes on both 0.2.0 and the current build, kills writers mid-batch and runs concurrent browser workers. `make release` packages only after the pinned defuss-vae 0.9.0 gate passes for the current source fingerprint. `make` lists every target; `.env.example` documents the browser executable overrides.
 
 | Page | Answers |
 | --- | --- |

@@ -1,5 +1,6 @@
 /** VERIFIED: Data is flushed before a checksummed head slot makes a root visible. */
-import { encodeFrame, decodeFrame } from 'defuss-dson/sequence';
+import { decodeFrame, encodeFrame } from 'defuss-dson/sequence';
+import { encodePage } from './page.js';
 import type { StorageFile } from 'defuss-storage';
 import { withFile, writeBytes } from './backend.js';
 import { DbsonlError, corrupt, reference, natural } from './common.js';
@@ -69,16 +70,24 @@ export async function readHead(backend: Backend, name: string, cache?: HeadCache
   if (cache) { cache.bytes = data; cache.head = head; }
   return head;
 }
-/** Publish exactly one slot. A failed call has an uncertain commit outcome; reopen to resolve it. */
-export async function publish(backend: Backend, name: string, head: Head): Promise<void> {
+/**
+ * Publish exactly one slot. A failed call has an uncertain commit outcome; reopen to resolve it.
+ * Publication only overwrites a slot of an existing file, so it needs no directory sync: callers
+ * sync the directory after creating or removing a file, before any head refers to it.
+ */
+export async function publish(backend: Backend, name: string, head: Head, cache?: HeadCache): Promise<void> {
   natural(head.publication, 'publication', 1);
-  const bytes = encodeFrame(head, { maxRecordBytes: SLOT_BYTES - 16 });
+  // trusted: the engine builds heads from plain data, so the per-property descriptor checks are skipped.
+  const bytes = encodeFrame(head, { maxRecordBytes: SLOT_BYTES - 16, trusted: true });
   const slot = new Uint8Array(SLOT_BYTES); slot.set(bytes);
-  await withFile(backend, headFile(name), { create: true }, async file => {
-    await writeBytes(file, (head.publication % 2) * SLOT_BYTES, slot, backend.writeChunkBytes);
+  const offset = (head.publication % 2) * SLOT_BYTES;
+  await withFile(backend, headFile(name), {}, async file => {
+    await writeBytes(file, offset, slot, backend.writeChunkBytes);
     await file.flush();
   });
-  await backend.coordinator.syncDirectory();
+  // The caller read cache.bytes under the same commit lock, so they plus this slot are the file now.
+  // readHead still compares every byte it rereads, so a wrong guess costs only a parse.
+  if (cache?.bytes?.length === SLOT_BYTES * 2) { const next = cache.bytes.slice(); next.set(slot, offset); cache.bytes = next; cache.head = head; }
 }
 /** A small page budget and a value budget are separate because long keys are legitimate. */
 export const PAGE_BYTES = 512 * 1024;
@@ -133,17 +142,23 @@ export class Appender {
     await writeBytes(this.file, this.flushedEnd, this.buffer.subarray(0, this.used), this.chunkSize);
     this.flushedEnd += this.used; this.used = 0;
   }
-  async bytes(bytes: Uint8Array): Promise<Ref> {
+  /** Synchronous unless the buffer must be written first; most frames only need a copy. */
+  bytes(bytes: Uint8Array): Ref | Promise<Ref> {
     const ref = { offset: this.end, byteLength: bytes.length };
     natural(this.end + bytes.length, 'file end');
-    if (bytes.length > this.buffer.length - this.used) await this.flush();
+    if (bytes.length <= this.buffer.length - this.used) { this.buffer.set(bytes, this.used); this.used += bytes.length; this.end += bytes.length; return ref; }
+    return this.spill(bytes, ref);
+  }
+  private async spill(bytes: Uint8Array, ref: Ref): Promise<Ref> {
+    await this.flush();
     if (bytes.length > this.buffer.length) {
       await writeBytes(this.file, this.end, bytes, this.chunkSize); this.flushedEnd += bytes.length;
     } else { this.buffer.set(bytes, this.used); this.used += bytes.length; }
     this.end += bytes.length; return ref;
   }
   async value(value: unknown, page = false): Promise<Ref> {
-    return this.bytes(encodeFrame(value, { maxRecordBytes: page ? PAGE_BYTES : this.limits.maxRecordBytes }));
+    // Index pages are engine-built plain data with known property names; caller values keep encodeFrame's checks.
+    return this.bytes(page ? encodePage(value as object, PAGE_BYTES) : encodeFrame(value, { maxRecordBytes: this.limits.maxRecordBytes }));
   }
   /** Committed pages only: the writer's own handle is exclusive, so it cannot reopen the file. */
   async read<T>(ref: Ref): Promise<T> {
