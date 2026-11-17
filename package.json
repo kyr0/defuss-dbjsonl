@@ -64,7 +64,7 @@
   },
   "dependencies": {
     "@lickle/lock": "0.0.1",
-    "defuss-dson": "1.5.0",
+    "defuss-dson": "1.5.1",
     "defuss-storage": "0.3.1"
   },
   "scripts": {

@@ -6,7 +6,7 @@
       "name": "defuss-dbsonl",
       "dependencies": {
         "@lickle/lock": "0.0.1",
-        "defuss-dson": "1.5.0",
+        "defuss-dson": "1.5.1",
         "defuss-storage": "0.3.1",
       },
       "devDependencies": {
@@ -313,7 +313,7 @@
 
     "deepmerge": ["deepmerge@4.3.1", "", {}, "sha512-3sUqbMEc77XqpdNO7FRyRog+eW3ph+GYCbj+rK+uYyRMuwsVy0rMiVtPn+QJlKFvWP/1PYpapqYn0Me2knFn+A=="],
 
-    "defuss-dson": ["defuss-dson@1.5.0", "", {}, "sha512-1Q/8APTY9rCEglvL4V023SJm37BejJQdx7IHh32RkA/E7weUB0PpFGtfAF4w8MgBm+1x5zbTZFZd0X4T9acU9w=="],
+    "defuss-dson": ["defuss-dson@1.5.1", "", {}, "sha512-Lm+nBTceq1nK2UepjVdtSBBR9guH8bSyZWpqv4dLfvvUS674SdlSPmiB8GDOrw+XfeitvAkUtezHjmX5fHPY/Q=="],
 
     "defuss-storage": ["defuss-storage@0.3.1", "", {}, "sha512-ygggE2yQIOwfBUDKjmeS55h+xX+Rq/0Hq4yZG0unr6rsu4cPSs4Ioh77y8CV1mMayf+OXS4gta8LDrzqOla2lQ=="],
 

@@ -1,6 +1,6 @@
 # DBSONL format 2
 
-VERIFIED: The disk format uses DSON 1.3.0 sequence frames. defuss-dson 1.4.0 and 1.5.0 write the same bytes as 1.3.0, so builds on any of these versions read each other's files. Each frame has a 16-byte DSQ header with length, header CRC32C and payload CRC32C. Payloads encode values and references locally to that frame. DBSONL adds no JSON/base64 layer.
+VERIFIED: The disk format uses DSON 1.3.0 sequence frames. defuss-dson 1.4.0, 1.5.0 and 1.5.1 write the same bytes as 1.3.0, so builds on any of these versions read each other's files. Each frame has a 16-byte DSQ header with length, header CRC32C and payload CRC32C. Payloads encode values and references locally to that frame. DBSONL adds no JSON/base64 layer.
 
 ## Files
 

@@ -25,9 +25,7 @@ Wrap: EVERY lead becomes a test | .vae/VERIFY.py rule | one MEMORY line with BC,
 2026-11-15T16:09:19Z s=afa01d3f FINDING docs/index.html:#tests learn=none: Keeping them current needs either generating the page section from output/coverage at make site time or a check against coverage-summary; neither exists yet. Ra
 2026-11-15T16:09:19Z s=afa01d3f FINDING docs/index.html:#stack learn=none: Positioning copy; README carries the same sentence.
 2026-11-15T16:09:19Z s=afa01d3f FINDING docs/index.html:hero rotate learn=none: Component limit documented in its CSS.
-2026-11-15T16:10:10Z s=afa01d3f DONE fp=4fb22c135ca7 cov=97.9% paths=CHANGELOG.md,Makefile,README.md,docs/PERFORMANCE.md(+13)
 2026-11-15T16:10:10Z s=afa01d3f FINDING docs/index.html:#why open card learn=none: Copy accuracy; checked against ARCH.md and the benchmark file.
-2026-11-15T16:22:10Z s=afa01d3f DONE fp=04dc18d42ba9 cov=97.9% paths=CHANGELOG.md,Makefile,README.md,docs/PERFORMANCE.md(+13)
 2026-11-15T16:22:10Z s=afa01d3f FINDING docs/index.html:#tests rings learn=none: Component behavior read from its source; one-off markup.
 2026-11-15T16:24:56Z s=afa01d3f DONE fp=687e2d8a3383 cov=97.9% paths=CHANGELOG.md,Makefile,README.md,docs/PERFORMANCE.md(+14)
 2026-11-15T16:24:56Z s=afa01d3f FINDING scripts/bench.ts:baselines learn=none: Benchmark harness change; checksum mismatch throws before measuring, which is the mechanical guard.
@@ -106,3 +104,5 @@ Wrap: EVERY lead becomes a test | .vae/VERIFY.py rule | one MEMORY line with BC,
 2026-11-17T00:12:30Z s=a4ea8ca3 FINDING src/core/io.ts:readCachedValues learn=memory: A performance threshold test would pin a machine-specific value; the lesson is a .vae/MEMORY.md line and a code comment.
 2026-11-17T00:12:30Z s=a4ea8ca3 FINDING CHANGELOG.md:0.6.0 P-precision learn=none: Wording only.
 2026-11-17T00:12:30Z s=a4ea8ca3 FINDING src/core/store.ts:scanBatches run decode learn=test: Covered by the new batches test.
+2026-11-17T00:40:14Z s=a4ea8ca3 DONE fp=743c0f73c4af cov=98.4% paths=CHANGELOG.md,Makefile,README.md,bun.lock(+26)
+2026-11-17T00:40:14Z s=a4ea8ca3 FINDING src/core/io.ts:readCachedValues learn=none: Simplification; behavior covered by the existing batches test.

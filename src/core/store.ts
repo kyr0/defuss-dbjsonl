@@ -39,7 +39,7 @@ export class ReadSession<T = unknown> {
     load(head: Readonly<Head>, ref: Ref): Page | Promise<Page>;
     value(head: Readonly<Head>, ref: Ref, window?: ReadWindow): Promise<T>;
     cachedValue(head: Readonly<Head>, ref: Ref, window: ReadWindow): T;
-    cachedValues(head: Readonly<Head>, entries: readonly Entry[], start: number, end: number, window: ReadWindow): T[];
+    cachedValues(entries: readonly Entry[], start: number, end: number, window: ReadWindow): T[];
     forget(session: ReadSession<T>): void;
   }, readonly head: Readonly<Head>, private readonly release: Release) {
     if (head.root) Object.freeze(head.root);
@@ -109,7 +109,7 @@ export class ReadSession<T = unknown> {
             const stop = Math.min(page.length, i + limit - count, i + batchSize - batch.length);
             first = i; last = i + 1;
             while (last < stop && windowContains(window, page[last]!.ref)) last++;
-            run = last - first > 1 ? db.cachedValues(head, page, first, last, window) : [];
+            run = last - first > 1 ? db.cachedValues(page, first, last, window) : [];
           }
           // A frame already in the window decodes without an await; only a real read suspends the batch.
           const value = i < last && run.length ? run[i - first] as T : windowContains(window, entry.ref) ? db.cachedValue(head, entry.ref, window) : await db.value(head, entry.ref, window);
@@ -233,7 +233,7 @@ export class Dbsonl<T = unknown> {
     return release;
   }
   private session(head: Head, release: Release): ReadSession<T> {
-    const session = new ReadSession<T>({ load: (head, ref) => this.load(head, ref), value: (head, ref, window) => this.value(head, ref, window), cachedValue: (head, ref, window) => readCachedValue<T>(head, ref, this.limits.maxRecordBytes, window), cachedValues: (head, entries, start, end, window) => readCachedValues<T>(head, entries, start, end, this.limits.maxRecordBytes, window), forget: session => { this.sessions.delete(session); } }, Object.freeze(head), release);
+    const session = new ReadSession<T>({ load: (head, ref) => this.load(head, ref), value: (head, ref, window) => this.value(head, ref, window), cachedValue: (head, ref, window) => readCachedValue<T>(head, ref, this.limits.maxRecordBytes, window), cachedValues: (entries, start, end, window) => readCachedValues<T>(entries, start, end, this.limits.maxRecordBytes, window), forget: session => { this.sessions.delete(session); } }, Object.freeze(head), release);
     this.sessions.add(session); return session;
   }
   /** Pin the currently published root; subsequent writers do not wait for its lifetime. */

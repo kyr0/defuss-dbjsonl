@@ -127,20 +127,14 @@ export function readCachedValue<T>(head: Readonly<Head>, ref: Ref, maxRecordByte
 /**
  * Decode entries[start, end), whose frames windowContains already found in the window, in one decoder call: that
  * validates the options and wraps the window once per run instead of once per frame. Returns no values when any frame
- * fails; the caller then reads that run frame by frame, so the error surfaces at its own row, after the rows before it.
+ * fails; the caller then reads that run frame by frame with readCachedValue, so the error surfaces at its own row,
+ * after the rows before it. That is why this needs no reference or budget check of its own: the window ends at or
+ * before the committed end, decodeFrames applies the budget to each frame, and a failure is raised again per frame.
  */
-export function readCachedValues<T>(head: Readonly<Head>, entries: readonly { ref: Ref }[], start: number, end: number, maxRecordBytes: number, window: ReadWindow): T[] {
+export function readCachedValues<T>(entries: readonly { ref: Ref }[], start: number, end: number, maxRecordBytes: number, window: ReadWindow): T[] {
   try {
     const offsets: number[] = [];
-    for (let i = start; i < end; i++) {
-      const ref = entries[i]!.ref;
-      reference(ref, head.end);
-      if (ref.byteLength - 16 > maxRecordBytes) return [];
-      // | 0 is exact (the window is at most 64 KiB) and hands the decoder an int32. An offset decoded from an index
-      // page is a double in JavaScriptCore, which then left the reader's int32 code. VERIFIED: (probe, 2026-11-17,
-      // Bun 1.4.3) without | 0, 503 type-speculation exits in its u32 reads and 2.7 instead of 1.9 µs per document.
-      offsets.push((ref.offset - window.offset!) | 0);
-    }
+    for (let i = start; i < end; i++) offsets.push(entries[i]!.ref.offset - window.offset!);
     const frames = decodeFrames(window.bytes!, offsets, { maxRecordBytes, maxDepth: 512, maxReferences: 1_000_000 }), values: T[] = [];
     // decodeFrames follows each frame's own header through the whole window, so only this check catches a reference
     // whose length differs from its frame; readCachedValue decodes a subarray of exactly the referenced length.
