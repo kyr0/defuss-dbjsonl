@@ -80,6 +80,32 @@ VERIFIED: The memory batches lose to encoding. In a CPU profile of a Node memory
 
 VERIFIED: Rejected in these probes: splitting pages at 16 or 8 entries instead of 32 left contended memory commits within noise and made memory batches 10% to 30% slower; deduplicating objects by identity in the page writer cost a leaf 1.5 to 2 µs of its gain; inserting cached pages unmarked was slightly slower than marking them. An earlier commit delay that waited before setting the head new snapshots pin measured 3.90 to 3.92 ms per contended Node commit against 3.62 to 3.81 ms without it. Cutting small frames from shared slabs left batch times within run-to-run noise.
 
+## Batch scans on macOS arm64
+
+VERIFIED: Three consecutive runs of `mise exec -- make bench-scan` on 2026-11-17, on the host above, with Node 24.22.1, Bun 1.4.3 and defuss-dson 1.5.0, at a load average of 3.2 to 3.7. Each run writes 100,000 documents of four fields (a short string, a number, a two-string array and a Date) in batches of 5000, then scans every one of them per case: the row scan of the vendored 0.5.0 package, the current row scan and the current `scanBatches` with its defaults. One untimed warmup checks that all three return the same count and checksum, then seven rounds alternate their order, each after a full garbage collection. The table shows the median of the three per-run medians in milliseconds per full scan. The raw reports are in `validation/bench-scan-macos-arm64.json`.
+
+| Runtime | Storage | 0.5.0 `scan` | `scan` | `scanBatches` | `scanBatches` vs 0.5.0 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Node | memory | 399.2 | 240.0 | 180.4 | 0.45 |
+| Node | native async | 341.4 | 310.5 | 243.8 | 0.71 |
+| Bun | memory | 349.9 | 219.0 | 180.2 | 0.51 |
+| Bun | native async | 321.0 | 310.5 | 273.9 | 0.85 |
+
+VERIFIED: On memory storage the row scan alone took 0.60 of 0.5.0's time under Node and 0.63 under Bun, mostly because scans now read ahead on every backend: 0.5.0 opened, read and closed the memory file once per row. On native storage, which already read ahead, the row scan took 0.91 under Node and 0.97 under Bun, the per-frame saving of defuss-dson 1.5.0. Batches gain more: one tracked pull per batch, one tree step per leaf, and one `decodeFrames` call per run of frames that the read window holds.
+
+VERIFIED: The same session also measured `scanBatches` on defuss-dson 1.4.0 and on 1.5.0 with the runs switched off, three runs each, medians in milliseconds per full scan:
+
+| Runtime | Storage | defuss-dson 1.4.0 | 1.5.0 | 1.5.0 with `decodeFrames` |
+| --- | --- | ---: | ---: | ---: |
+| Node | memory | 216.2 | 189.7 | 180.4 |
+| Node | native async | 284.1 | 262.4 | 243.8 |
+| Bun | memory | 196.2 | 188.6 | 180.2 |
+| Bun | native async | 284.1 | 283.7 | 273.9 |
+
+VERIFIED: The run offsets go to `decodeFrames` as int32 values. Offsets decoded from an index page are doubles in JavaScriptCore, and with them Bun left the decoder's int32 code: 503 type-speculation exits in its 32-bit reads, and `scanBatches` took 0.70 of 0.5.0's time on memory storage instead of 0.52, slower than without runs. Node was unaffected.
+
+VERIFIED: Most of what remains is decoding. In a CPU profile under Node on defuss-dson 1.4.0, of one process that loads the 100,000 documents into memory storage and then scans them ten times with `scanBatches`, defuss-dson took 74% of the time: decoding values, checking each frame's checksum, and setting up a reader and limits for every frame. defuss-dbsonl's own code took 14%. defuss-dson 1.5.0 removes most of the per-frame setup; the checksums and building each value remain.
+
 ## Linux x64: v0.2 and v0.3
 
 VERIFIED: Times below are medians of seven measured rounds after two complete warmup rounds, in milliseconds per 1000 operations or rows. Batch means one atomic commit of 1000 mutations, including flushes. Reopen is one indexed open, not 1000 opens. Raw samples, measured build SHA-256 hashes, exact runtime versions and host metadata are in `validation/bench.json` in the source ZIP.

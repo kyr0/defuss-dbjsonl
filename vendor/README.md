@@ -7,3 +7,5 @@
 VERIFIED: `defuss-dbsonl-0.2.0.tgz` is the previously shipped, unmodified package used by compatibility tests and matched benchmarks. SHA-256: `90eaf0e5e6c78cc636f6fb9273cc0475a1e2220180ecd569f97bac7ad0a3fe1b`. It retains its MIT license and is excluded from the published runtime package.
 
 VERIFIED: `defuss-dbsonl-0.3.0.tgz` is the 0.3.0 build measured in `docs/PERFORMANCE.md`; its `dist/index.mjs` and `dist/node.mjs` SHA-256 hashes match the artifacts recorded in the earlier benchmark reports. `make bench` measures it beside v0.2.0 and the current build. SHA-256: `264209b1774450d4b267483539d1d48dda9d4d808f09d94c7ac4412e57bbbc50`. It was never published to npm and is excluded from the published runtime package.
+
+VERIFIED: `defuss-dbsonl-0.5.0.tgz` is the 0.5.0 package as published to npm: its SHA-1 matches the registry's `dist.shasum`, `946aedea51c132e029afa1d7f8f3a49160db3d9d`. `make bench-scan` measures its row scan beside the current build. SHA-256: `d7de80813dbcaefac8f6e2df6e92f1f270ea89a87224216fa8d03b79ed2f58c7`. It retains its MIT license and is excluded from the published runtime package.

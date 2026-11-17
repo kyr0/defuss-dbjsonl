@@ -52,6 +52,8 @@ export type Mutation<T> = { operation: 'put'; key: string; value: T } | { operat
 export type Lookup<T> = { found: false; value?: never; revision?: never } | { found: true; value: T; revision: number };
 export interface Row<T> { key: string; value: T; revision: number }
 export interface ScanOptions { gte?: string; lt?: string; limit?: number; signal?: CancellationSignal }
+/** Batch bytes use encoded frame lengths unless a pure retained-size estimator is supplied. */
+export interface BatchScanOptions<T> extends ScanOptions { batchSize?: number; maxBatchBytes?: number; sizeOf?: (row: Row<T>) => number }
 export interface CommitOptions { ifRevision?: number; signal?: CancellationSignal }
 export interface Commit { revision: number; count: number }
 export interface Stats extends Commit {

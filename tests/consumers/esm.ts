@@ -20,6 +20,9 @@ try {
     assert.ok(found.found, label);
     assert.deepEqual(found.value, value, label);
     assert.deepEqual(await db.get('gone'), { found: false }, label);
+    const session = await db.beginRead();
+    const batches = []; for await (const batch of session.scanBatches({ batchSize: 2 })) batches.push(batch);
+    assert.equal(batches.length,1); assert.deepEqual(batches[0]![0]!.value,value); await session.close();
     assert.deepEqual(await db.verify(), { revision: 1, count: 1 }, label);
     await db.close();
   }

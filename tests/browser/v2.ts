@@ -30,6 +30,10 @@ self.onmessage = async ({ data }) => {
       await snapshot.close(); if ((await db.collect()).removed.length !== 1) throw new Error('Unpinned generation was not reclaimed.');
       await db.verify();
     }
+    const batchSession = await db.beginRead(); let batchRows = 0;
+    for await (const batch of batchSession.scanBatches({ batchSize: 7 })) batchRows += batch.length;
+    if (batchRows !== batchSession.count) throw new Error('Native browser batch count differs.');
+    await batchSession.close();
     await db.close(); self.postMessage({ ok: true });
   } catch (error) { self.postMessage({ ok: false, error: error instanceof Error ? error.stack : String(error) }); }
 };

@@ -4,10 +4,10 @@ import type { CancellationSignal } from 'defuss-storage';
 import { withFile, locked } from './backend.js';
 import { DbsonlError, abort, key, name as validateName, options as resolveOptions, natural, corrupt } from './common.js';
 import type { Limits } from './common.js';
-import { Appender, generationFile, headFile, publish, readHead, readValue, PAGE_BYTES } from './io.js';
+import { Appender, generationFile, headFile, publish, readHead, readValue, readCachedValue, readCachedValues, windowContains, PAGE_BYTES } from './io.js';
 import type { HeadCache, ReadWindow } from './io.js';
-import { entries, find, validatePage, BulkTree, BatchTree } from './tree.js';
-import type { Backend, Entry, Head, Page, Ref, Release, Options, Lookup, Row, ScanOptions, Mutation, Commit, CommitOptions, Stats, Transaction } from './types.js';
+import { entries, entryPages, find, validatePage, BulkTree, BatchTree } from './tree.js';
+import type { Backend, Entry, Head, Page, Ref, Release, Options, Lookup, Row, ScanOptions, BatchScanOptions, Mutation, Commit, CommitOptions, Stats, Transaction } from './types.js';
 
 type Encoded = { key: string; bytes: Uint8Array | undefined };
 /** A transaction's point reads, checked key by key at commit. After a scan or too many reads, whole falls back to the database revision. */
@@ -38,14 +38,17 @@ export class ReadSession<T = unknown> {
   constructor(private readonly db: {
     load(head: Readonly<Head>, ref: Ref): Page | Promise<Page>;
     value(head: Readonly<Head>, ref: Ref, window?: ReadWindow): Promise<T>;
+    cachedValue(head: Readonly<Head>, ref: Ref, window: ReadWindow): T;
+    cachedValues(head: Readonly<Head>, entries: readonly Entry[], start: number, end: number, window: ReadWindow): T[];
     forget(session: ReadSession<T>): void;
   }, readonly head: Readonly<Head>, private readonly release: Release) {
     if (head.root) Object.freeze(head.root);
     this.revision = head.revision; this.count = head.count;
   }
-  private work<R>(fn: () => Promise<R>): Promise<R> {
+  private work<R>(fn: () => Promise<R>, invokesUserCode = false): Promise<R> {
     if (this.closed) return Promise.reject(new DbsonlError('CLOSED', 'Snapshot is closed.'));
-    const promise = fn(); this.pending.add(promise);
+    // A batch can call user sizeOf before its first await; admission must be recorded first.
+    const promise = invokesUserCode ? Promise.resolve().then(fn) : fn(); this.pending.add(promise);
     void promise.then(() => this.pending.delete(promise), () => this.pending.delete(promise));
     return promise;
   }
@@ -77,6 +80,55 @@ export class ReadSession<T = unknown> {
     return {
       [Symbol.asyncIterator]() { return this; },
       next: () => this.work(() => iterator.next()),
+      return: () => iterator.return(undefined),
+      throw: error => iterator.throw(error),
+    };
+  }
+  /** Native bounded batches: one tracked pull per batch and one async traversal per leaf. */
+  scanBatches(options: BatchScanOptions<T> = {}): AsyncIterableIterator<readonly Row<T>[], void> {
+    const { gte, lt, signal, sizeOf } = options;
+    if (gte !== undefined) key(gte); if (lt !== undefined) key(lt);
+    const limit = natural(options.limit ?? Number.MAX_SAFE_INTEGER, 'scan limit');
+    const batchSize = natural(options.batchSize ?? 256, 'batchSize', 1);
+    const maxBytes = natural(options.maxBatchBytes ?? 4 * 1024 * 1024, 'maxBatchBytes', 1);
+    if (sizeOf !== undefined && typeof sizeOf !== 'function') throw new TypeError('sizeOf must be a function.');
+    const { db, head } = this;
+    async function* batches() {
+      let count = 0, bytes = 0, batch: Row<T>[] = [];
+      const window: ReadWindow = {};
+      abort(signal); if (!limit) return;
+      for await (const page of entryPages(ref => db.load(head, ref), head.root, gte, lt)) {
+        // page[first, last) was decoded in one call; run is empty when that call failed and the rows read one by one.
+        let first = 0, last = 0, run: T[] = [];
+        for (let i = 0; i < page.length; i++) {
+          const entry = page[i]!;
+          abort(signal);
+          if (i >= last && windowContains(window, entry.ref)) {
+            // The frames already in the window, up to what the limit and this batch still take, so a run decodes no row
+            // the caller may never ask for.
+            const stop = Math.min(page.length, i + limit - count, i + batchSize - batch.length);
+            first = i; last = i + 1;
+            while (last < stop && windowContains(window, page[last]!.ref)) last++;
+            run = last - first > 1 ? db.cachedValues(head, page, first, last, window) : [];
+          }
+          // A frame already in the window decodes without an await; only a real read suspends the batch.
+          const value = i < last && run.length ? run[i - first] as T : windowContains(window, entry.ref) ? db.cachedValue(head, entry.ref, window) : await db.value(head, entry.ref, window);
+          abort(signal);
+          const row = { key: entry.key, revision: entry.revision, value };
+          const size = natural(sizeOf ? sizeOf(row) : entry.ref.byteLength, 'batch row bytes');
+          if (size > maxBytes) throw new DbsonlError('LIMIT_EXCEEDED', 'One row exceeds the batch byte budget.');
+          if (batch.length && bytes + size > maxBytes) { yield batch; batch = []; bytes = 0; abort(signal); }
+          batch.push(row); bytes += size; count++;
+          if (batch.length === batchSize) { yield batch; batch = []; bytes = 0; abort(signal); }
+          if (count === limit) { if (batch.length) yield batch; return; }
+        }
+      }
+      if (batch.length) yield batch;
+    }
+    const iterator = batches();
+    return {
+      [Symbol.asyncIterator]() { return this; },
+      next: () => this.work(() => iterator.next(), true),
       return: () => iterator.return(undefined),
       throw: error => iterator.throw(error),
     };
@@ -181,7 +233,7 @@ export class Dbsonl<T = unknown> {
     return release;
   }
   private session(head: Head, release: Release): ReadSession<T> {
-    const session = new ReadSession<T>({ load: (head, ref) => this.load(head, ref), value: (head, ref, window) => this.value(head, ref, window), forget: session => { this.sessions.delete(session); } }, Object.freeze(head), release);
+    const session = new ReadSession<T>({ load: (head, ref) => this.load(head, ref), value: (head, ref, window) => this.value(head, ref, window), cachedValue: (head, ref, window) => readCachedValue<T>(head, ref, this.limits.maxRecordBytes, window), cachedValues: (head, entries, start, end, window) => readCachedValues<T>(head, entries, start, end, this.limits.maxRecordBytes, window), forget: session => { this.sessions.delete(session); } }, Object.freeze(head), release);
     this.sessions.add(session); return session;
   }
   /** Pin the currently published root; subsequent writers do not wait for its lifetime. */

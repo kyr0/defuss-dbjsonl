@@ -1,5 +1,5 @@
 /** VERIFIED: Data is flushed before a checksummed head slot makes a root visible. */
-import { decodeFrame, encodeFrame } from 'defuss-dson/sequence';
+import { decodeFrame, decodeFrames, encodeFrame } from 'defuss-dson/sequence';
 import { encodePage } from './page.js';
 import type { StorageFile } from 'defuss-storage';
 import { withFile, writeBytes } from './backend.js';
@@ -99,21 +99,54 @@ export async function readValue<T>(backend: Backend, name: string, head: Head, r
   // before allocation, then verify the complete frame in one positional read.
   if (ref.byteLength - 16 > maxRecordBytes) throw new DbsonlError('LIMIT_EXCEEDED', 'Referenced record exceeds the decoder budget.');
   let bytes: Uint8Array;
-  if (window?.bytes && window.offset !== undefined && ref.offset >= window.offset && ref.offset + ref.byteLength <= window.offset + window.bytes.length) {
-    bytes = window.bytes.subarray(ref.offset - window.offset, ref.offset - window.offset + ref.byteLength);
+  if (window && windowContains(window, ref)) {
+    bytes = window.bytes!.subarray(ref.offset - window.offset!, ref.offset - window.offset! + ref.byteLength);
   } else {
-    const length = backend.read && window && ref.byteLength <= 65536 ? Math.min(65536, head.end - ref.offset) : ref.byteLength;
+    const length = window && ref.byteLength <= 65536 ? Math.min(65536, head.end - ref.offset) : ref.byteLength;
     const filename = generationFile(name, head.generation);
     const data = backend.read ? await backend.read(filename, ref.offset, length) :
-      // Portable handles also benefit from known, bounded reference lengths:
-      // fetch header and payload together rather than allocate and copy twice.
+      // Portable handles read the same bounded window, so a scan opens the file once per window, not per row.
       await withFile(backend, filename, { readOnly: true }, file => readExact(file, ref.offset, length));
     // Prefetch stays inside the pinned committed prefix. Large records bypass it
     // so the scan cannot retain a second record-sized allocation between pulls.
-    if (window && backend.read) { window.offset = ref.offset; window.bytes = length <= 65536 ? data : new Uint8Array(0); }
+    if (window) { window.offset = ref.offset; window.bytes = length <= 65536 ? data : new Uint8Array(0); }
     bytes = data.subarray(0, ref.byteLength);
   }
   return decodeRef<T>(bytes, ref, maxRecordBytes);
+}
+/** Test the bounded committed window without allocating a Promise per cache hit. */
+export function windowContains(window: ReadWindow, ref: Ref): boolean {
+  return !!window.bytes && window.offset !== undefined && ref.offset >= window.offset && ref.offset + ref.byteLength <= window.offset + window.bytes.length;
+}
+/** Caller checked windowContains; validate limits and checksum even on a hit. */
+export function readCachedValue<T>(head: Readonly<Head>, ref: Ref, maxRecordBytes: number, window: ReadWindow): T {
+  reference(ref, head.end);
+  if (ref.byteLength - 16 > maxRecordBytes) throw new DbsonlError('LIMIT_EXCEEDED', 'Referenced record exceeds the decoder budget.');
+  return decodeRef<T>(window.bytes!.subarray(ref.offset - window.offset!, ref.offset - window.offset! + ref.byteLength), ref, maxRecordBytes);
+}
+/**
+ * Decode entries[start, end), whose frames windowContains already found in the window, in one decoder call: that
+ * validates the options and wraps the window once per run instead of once per frame. Returns no values when any frame
+ * fails; the caller then reads that run frame by frame, so the error surfaces at its own row, after the rows before it.
+ */
+export function readCachedValues<T>(head: Readonly<Head>, entries: readonly { ref: Ref }[], start: number, end: number, maxRecordBytes: number, window: ReadWindow): T[] {
+  try {
+    const offsets: number[] = [];
+    for (let i = start; i < end; i++) {
+      const ref = entries[i]!.ref;
+      reference(ref, head.end);
+      if (ref.byteLength - 16 > maxRecordBytes) return [];
+      // | 0 is exact (the window is at most 64 KiB) and hands the decoder an int32. An offset decoded from an index
+      // page is a double in JavaScriptCore, which then left the reader's int32 code. VERIFIED: (probe, 2026-11-17,
+      // Bun 1.4.3) without | 0, 503 type-speculation exits in its u32 reads and 2.7 instead of 1.9 µs per document.
+      offsets.push((ref.offset - window.offset!) | 0);
+    }
+    const frames = decodeFrames(window.bytes!, offsets, { maxRecordBytes, maxDepth: 512, maxReferences: 1_000_000 }), values: T[] = [];
+    // decodeFrames follows each frame's own header through the whole window, so only this check catches a reference
+    // whose length differs from its frame; readCachedValue decodes a subarray of exactly the referenced length.
+    for (let i = 0; i < frames.length; i++) { if (frames[i]!.byteLength !== entries[start + i]!.ref.byteLength) return []; values.push(frames[i]!.value as T); }
+    return values;
+  } catch { return []; }
 }
 /** One decoder boundary for values and the writer's page reads: checksum, budget and exact length. */
 function decodeRef<T>(bytes: Uint8Array, ref: Ref, maxRecordBytes: number): T {

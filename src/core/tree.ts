@@ -66,6 +66,24 @@ export async function* entries(load: LoadPage, root: Ref | null, gte?: string, l
     }
   }
 }
+/** Batch traversal amortizes async generator handoffs over a complete leaf. */
+export async function* entryPages(load: LoadPage, root: Ref | null, gte?: string, lt?: string, depth = 0): AsyncIterableIterator<readonly Entry[]> {
+  if (!root) return;
+  if (depth > 64) corrupt('Index depth exceeds the format safety bound.');
+  const loaded = load(root), page = 'kind' in loaded ? loaded : await loaded;
+  if (page.kind === 'leaf') {
+    const start = gte === undefined ? 0 : lower(page.entries, gte, item => item.key);
+    const end = lt === undefined ? page.entries.length : lower(page.entries, lt, item => item.key);
+    if (end > start) yield start === 0 && end === page.entries.length ? page.entries : page.entries.slice(start, end);
+  } else {
+    let prior: string | undefined;
+    for (const child of page.children) {
+      if (lt !== undefined && prior !== undefined && prior >= lt) break;
+      if (gte === undefined || child.max >= gte) yield* entryPages(load, child.ref, gte, lt, depth + 1);
+      prior = child.max;
+    }
+  }
+}
 type Link = Ref | DirtyPage;
 type Route = { max: string; count: number; ref: Link };
 type DirtyPage = { kind: 'leaf'; entries: Entry[] } | { kind: 'branch'; children: Route[] };

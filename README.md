@@ -1,6 +1,6 @@
-# defuss-dbsonl 0.5.1
+# defuss-dbsonl 0.6.0
 
-Transactional key-value storage for Node.js, Bun and browser workers. Values are DSON, so dates, binary views, bigint, `undefined` and cyclic references survive storage. It is built on [defuss-dson](https://dson.defuss.org) 1.4.0 and [defuss-storage](https://storage.defuss.org) 0.3.1 and ships TypeScript declarations with ESM and CommonJS builds. It is designed as the backing store and API of [defuss-dataview](https://dataview.defuss.org), which adds filters, sorting and paging for table and tree grids. Project website: [dbsonl.defuss.org](https://dbsonl.defuss.org).
+Transactional key-value storage for Node.js, Bun and browser workers. Values are DSON, so dates, binary views, bigint, `undefined` and cyclic references survive storage. It is built on [defuss-dson](https://dson.defuss.org) 1.5.0 and [defuss-storage](https://storage.defuss.org) 0.3.1 and ships TypeScript declarations with ESM and CommonJS builds. It is designed as the backing store and API of [defuss-dataview](https://dataview.defuss.org), which adds filters, sorting and paging for table and tree grids. Project website: [dbsonl.defuss.org](https://dbsonl.defuss.org).
 
 VERIFIED: A database is a persistent copy-on-write B+tree with immutable snapshots, atomic batches, optimistic serializable transactions, compaction and process-safe coordination. Opening reads two small manifest slots instead of replaying a log, and readers never block writers.
 
@@ -49,6 +49,8 @@ try {
 ```
 
 The transaction callback runs once. A concurrent commit that changed a key the callback read makes it fail with `CONFLICT` instead of retrying, because a retry would repeat any side effects in your callback; after a scan, any concurrent commit does. Retry explicitly where that is safe. Concurrent batches and transactions on one handle publish together: one write and one pair of flushes for the queued group, while each keeps its own revision and receipt. `ifRevision` gives compare-and-swap for changes prepared outside a transaction.
+
+For bulk reads, a snapshot's `scanBatches()` yields the same rows as `scan()` in arrays of up to 256. It tracks one pull per batch instead of one per row, so a full scan takes less time; [API](docs/API.md) has its byte budget and options.
 
 Memory storage needs no platform entry:
 
@@ -109,7 +111,7 @@ Resource budgets cap retained engine work. The page cache is bounded by encoded 
 
 ## Compatibility
 
-VERIFIED: Versions 0.2 through 0.5 share the on-disk format and the lock protocol. The packed-package suite runs 0.2.0 and the current build concurrently on Node and Bun against one database, so upgrading needs no migration.
+VERIFIED: Versions 0.2 through 0.6 share the on-disk format and the lock protocol. The packed-package suite runs 0.2.0 and the current build concurrently on Node and Bun against one database, so upgrading needs no migration.
 
 Version 0.4.0 renamed the native entry from `defuss-dbsonl/node` to `defuss-dbsonl/server` and removed the `/legacy` and `/records` subpaths. Data in the v0.1 log format must be migrated with defuss-dbsonl 0.3.x first; that release ships `defuss-dbsonl/legacy` and `examples/migrate.ts`. See [CHANGELOG.md](CHANGELOG.md).
 
@@ -119,6 +121,7 @@ Version 0.4.0 renamed the native entry from `defuss-dbsonl/node` to `defuss-dbso
 make setup    # pinned Node/Bun/Redis via mise, dependencies, Chromium, WebKit, VAE runtime
 make verify   # lint, tests, coverage, packed-package e2e
 make bench    # matched v0.2 versus current benchmarks
+make bench-scan   # full scans, row by row and in batches, against the vendored 0.5.0
 make bench-redis  # current build versus a throwaway loopback Redis, run as mise exec -- make bench-redis
 make dev      # rebuild the website demos and serve docs/ on 127.0.0.1:3000
 make vae      # verification, review and documentation gate

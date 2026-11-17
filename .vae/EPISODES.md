@@ -12,28 +12,16 @@ Wrap: EVERY lead becomes a test | .vae/VERIFY.py rule | one MEMORY line with BC,
 2026-11-14T13:56:12Z s=afa01d3f FINDING docs/PERFORMANCE.md:3,81 learn=none: semantic evidence
 2026-11-14T13:56:12Z s=afa01d3f FINDING tests/browser/ARCH.md:7; scripts/ARCH.md:3,12; tests/ARCH.md; src/legacy/ARCH.md:19; docs/legacy/ARCH.md:3; docs/legacy/API.md:3 learn=none: semantic doc drift
 2026-11-14T14:32:48Z s=afa01d3f FINDING scripts/bench.ts:38 learn=none: report-text correctness; no proportionate mechanical check
-2026-11-14T14:32:48Z s=afa01d3f FINDING src/core/io.ts:Appender.read learn=test: tests/mvcc.test.ts tree-growth and long-key budget tests load committed pages through Appender.read
-2026-11-15T14:41:31Z s=afa01d3f DONE fp=a5cc221cb1bb cov=97.9% paths=CHANGELOG.md,Makefile,README.md,docs/assets/demo.js(+11)
 2026-11-15T14:41:31Z s=afa01d3f FINDING site/demo.ts:conflicts learn=none: Demo-only control flow; forcing a memory put to fail needs a fault hook the public API does not offer, so no real-subsystem test can trigger it.
 2026-11-15T14:41:31Z s=afa01d3f FINDING site/demo.ts:snapshots learn=none: Presentation state; the e2e run drives the transfer path.
-2026-11-15T14:41:31Z s=afa01d3f FINDING docs/index.html:head learn=test: sha384 integrity on every jsdelivr asset; scripts/e2e.ts waits for the three shader canvases, which fail to mount if an integrity check blocks the runtime.
-2026-11-15T14:41:31Z s=afa01d3f FINDING scripts/e2e.ts:website learn=test: scripts/e2e.ts compares docs/assets byte for byte with a fresh bundle built from the packed tarball and fails with 'run make site'.
-2026-11-15T15:34:38Z s=afa01d3f DONE fp=cec39c5b7f43 cov=97.9% paths=CHANGELOG.md,Makefile,README.md,docs/assets/demo.js(+11)
-2026-11-15T15:56:37Z s=afa01d3f DONE fp=d78d0d4d2c51 cov=97.9% paths=CHANGELOG.md,Makefile,README.md,docs/assets/demo.js(+11)
 2026-11-15T15:56:37Z s=afa01d3f FINDING docs/index.html:hero-title learn=none: Copy decision by the human; no mechanical check applies.
-2026-11-15T16:01:02Z s=afa01d3f DONE fp=a7a30f9fbf01 cov=97.9% paths=CHANGELOG.md,Makefile,README.md,docs/assets/demo.js(+11)
 2026-11-15T16:01:02Z s=afa01d3f FINDING docs/index.html:hero-title learn=none: Copy accuracy; the types demo in e2e covers the round-trip behavior the copy describes.
 2026-11-15T16:01:02Z s=afa01d3f FINDING docs/index.html:hero rotate learn=none: Component limit documented in its CSS comment; one-off markup.
 2026-11-15T16:01:02Z s=afa01d3f FINDING docs/index.html:mk-hero-desc learn=none: Prose repetition; not mechanically checkable.
-2026-11-15T16:06:10Z s=afa01d3f DONE fp=8f0cfbab4453 cov=97.9% paths=CHANGELOG.md,Makefile,README.md,docs/PERFORMANCE.md(+13)
-2026-11-15T16:06:10Z s=afa01d3f FINDING docs/index.html:#performance learn=memory: .vae/CLI_GIST.md: run make bench as mise exec -- make bench.
 2026-11-15T16:06:10Z s=afa01d3f FINDING docs/PERFORMANCE.md:intro learn=none: Reference wording; not mechanically checkable.
 2026-11-15T16:06:10Z s=afa01d3f FINDING docs/index.html:hero-title learn=none: Copy accuracy; the e2e types demo covers the round trip.
 2026-11-15T16:06:10Z s=afa01d3f FINDING docs/index.html:hero rotate learn=none: Component limit documented in its CSS; one-off markup.
 2026-11-15T16:06:10Z s=afa01d3f FINDING site/demo.ts:conflicts learn=none: Demo-only control flow; forcing a memory put to fail needs a fault hook the public API does not offer.
-2026-11-15T16:06:10Z s=afa01d3f FINDING docs/index.html:head learn=test: sha384 integrity on every jsdelivr asset; scripts/e2e.ts waits for the three shader canvases.
-2026-11-15T16:06:10Z s=afa01d3f FINDING scripts/e2e.ts:website learn=test: scripts/e2e.ts compares docs/assets byte for byte with a fresh bundle from the packed tarball.
-2026-11-15T16:09:19Z s=afa01d3f DONE fp=ab61a144f7c0 cov=97.9% paths=CHANGELOG.md,Makefile,README.md,docs/PERFORMANCE.md(+13)
 2026-11-15T16:09:19Z s=afa01d3f FINDING docs/index.html:#tests learn=none: Keeping them current needs either generating the page section from output/coverage at make site time or a check against coverage-summary; neither exists yet. Ra
 2026-11-15T16:09:19Z s=afa01d3f FINDING docs/index.html:#stack learn=none: Positioning copy; README carries the same sentence.
 2026-11-15T16:09:19Z s=afa01d3f FINDING docs/index.html:hero rotate learn=none: Component limit documented in its CSS.
@@ -106,3 +94,15 @@ Wrap: EVERY lead becomes a test | .vae/VERIFY.py rule | one MEMORY line with BC,
 2026-11-16T21:13:21Z s=a4ea8ca3 FINDING docs/index.html:.db-vs-gauge learn=test: make e2e already fails on sideways scroll at iPhone size and now waits for both charts before measuring.
 2026-11-16T21:13:21Z s=a4ea8ca3 FINDING docs/index.html:Redis comparison script guard learn=none: A CDN outage is not reproducible in e2e without blocking the request; proportionate check would mock the network, which the project rules forbid.
 2026-11-16T21:13:21Z s=a4ea8ca3 FINDING docs/index.html:RUNS learn=none: Figures change only with a new benchmark run; a test pinning them would pin values that worked once.
+2026-11-16T22:12:24Z s=a4ea8ca3 DONE fp=5dd8028ce88f cov=98.4% paths=CHANGELOG.md,Makefile,README.md,docs/API.md(+24)
+2026-11-16T22:12:24Z s=a4ea8ca3 FINDING docs/assets/demo.js learn=verifier: scripts/e2e.ts already compares the committed bundles with a fresh build and caught it.
+2026-11-16T22:12:24Z s=a4ea8ca3 FINDING docs/API.md scanBatches paragraph (handoff wording) learn=test: tests/batches.test.ts 'invalid options throw, an oversized row fails its batch after earlier batches...'.
+2026-11-16T22:12:24Z s=a4ea8ca3 FINDING src/core/store.ts:scanBatches sizeOf learn=test: tests/batches.test.ts asserts the three rejected sizes.
+2026-11-16T22:12:24Z s=a4ea8ca3 FINDING src/index.ts:BatchScanOptions learn=none: pkgroll reports this as a warning, not an exit code; failing the build on dts warnings would be a broader tooling change.
+2026-11-16T22:12:24Z s=a4ea8ca3 FINDING src/core/io.ts:readValue, src/core/store.ts:cachedValue learn=none: Structure cleanup, no defect.
+2026-11-16T22:12:24Z s=a4ea8ca3 FINDING scripts/bench-scan.ts:record learn=none: Naming only.
+2026-11-16T22:12:24Z s=a4ea8ca3 FINDING src/core/io.ts read window on portable backends learn=test: Covered by the stable-snapshot case on memory and native storage and the OPFS worker case.
+2026-11-17T00:12:30Z s=a4ea8ca3 DONE fp=029ee2b849b2 cov=98.4% paths=CHANGELOG.md,Makefile,README.md,bun.lock(+26)
+2026-11-17T00:12:30Z s=a4ea8ca3 FINDING src/core/io.ts:readCachedValues learn=memory: A performance threshold test would pin a machine-specific value; the lesson is a .vae/MEMORY.md line and a code comment.
+2026-11-17T00:12:30Z s=a4ea8ca3 FINDING CHANGELOG.md:0.6.0 P-precision learn=none: Wording only.
+2026-11-17T00:12:30Z s=a4ea8ca3 FINDING src/core/store.ts:scanBatches run decode learn=test: Covered by the new batches test.

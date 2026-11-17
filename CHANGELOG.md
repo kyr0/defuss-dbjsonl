@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.0
+
+VERIFIED: Snapshots have `scanBatches({gte?, lt?, limit?, signal?, batchSize?, maxBatchBytes?, sizeOf?})`, which yields the rows of `scan` as arrays of at most 256 rows and 4 MiB by default, with one tracked pull per batch and one tree step per leaf. It is ported from the 0.4-based fork that defuss-dataview's DBSONL adapter used, with the option names and guarantees that adapter checks: a nonempty array per batch, at most `batchSize` rows and `sizeOf` applied once per row.
+
+VERIFIED: Scans now read ahead 64 KiB on every backend, not only on backends with a positional `read`, so a memory or OPFS scan no longer opens, reads and closes the file once per row.
+
+VERIFIED: defuss-dson is now 1.5.0, which writes the same frames as 1.3.0 and reads each frame through one reader. `scanBatches` decodes the frames of a leaf that the read window already holds in one `decodeFrames` call; when a frame fails, it rereads that run frame by frame, so errors arrive at the same row as before.
+
+VERIFIED: In three runs of the new `make bench-scan` over 100,000 documents, the row scan on memory storage took 0.60 of 0.5.0's time under Node and 0.63 under Bun; `scanBatches` took 0.45 and 0.51 on memory storage and 0.71 and 0.85 on native storage. Against the same source on defuss-dson 1.4.0, the version bump alone took 12% off `scanBatches` on Node memory storage and 8% on native storage, and `decodeFrames` another 5% and 7%; under Bun, 4% and 0%, then 5% and 4%. `vendor/defuss-dbsonl-0.5.0.tgz` is the published 0.5.0 package these runs compare against.
+
+VERIFIED: `tests/batches.test.ts` covers batch scans on memory and native storage, and the packed-package and browser suites call `scanBatches` too. The on-disk format and lock protocol are unchanged.
+
 ## 0.5.1
 
 VERIFIED: `package.json` names the project website, https://dbsonl.defuss.org, as its homepage, and links the GitHub repository and issue tracker. The README explains installing from npm: on 2026-11-16, `bun add defuss-dbsonl@0.5.0` and `npm install defuss-dbsonl@0.5.0` each installed five packages in an empty project with no install script, and the `/server` entry stored and read a value under Node.js and Bun on macOS arm64.

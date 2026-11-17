@@ -5,7 +5,7 @@ BUN ?= bun
 export
 VAE := python3 tmp/vae-tooling/plugin/scripts/vae.py
 
-.PHONY: help setup build site dev lint test coverage e2e verify bench bench-scale bench-redis metrics vae-setup vae prose release start stop restart status log
+.PHONY: help setup build site dev lint test coverage e2e verify bench bench-scale bench-scan bench-redis metrics vae-setup vae prose release start stop restart status log
 help: ## List available targets.
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "%-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 setup: ## Install pinned dependencies (Node, Bun, Redis), Chromium, WebKit and the VAE runtime.
@@ -35,6 +35,8 @@ bench: build ## Compare v0.2.0, v0.3.0 and the current build across Node/Bun, na
 	$(BUN) scripts/bench.ts
 bench-scale: build ## Compare the three builds on 10000-record native async workloads, three measured rounds.
 	$(BUN) scripts/bench.ts --scale
+bench-scan: build ## Time full scans of 100000 documents, row by row and in batches, against the vendored 0.5.0.
+	$(BUN) scripts/bench-scan.ts
 bench-redis: build ## Compare the current build with a throwaway loopback Redis (pinned in mise.toml): reads, batches and transactions.
 	$(BUN) scripts/bench-redis.ts
 metrics: ## Print the last benchmark report.

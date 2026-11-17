@@ -7,4 +7,5 @@ await db.put('bad', 1);
 const session: ReadSession<{ x: number }> = await db.beginRead();
 const found = await session.get('a'); if (found.found) { const value: number = found.value.x; void value; }
 await db.transaction(async (tx: Transaction<{ x: number }>) => { tx.put('b', { x: 2 }); return (await tx.get('b')).found; });
+for await (const batch of session.scanBatches({ sizeOf: row => row.value.x })) { const value: number = batch[0]!.value.x; void value; }
 await session.close(); await db.close();
