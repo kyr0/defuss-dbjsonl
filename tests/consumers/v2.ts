@@ -19,7 +19,10 @@ function child(runtime: string, mode: string, id = '0', script = 'v2-worker.js')
 }
 const children: ReturnType<typeof child>[] = [];
 try {
-  const backend = await createFileBackend(root); const db = await openDbsonl<number>(backend, 'multi', { create: true });
+  const created = child('node', 'create', '0', process.argv[3]!); children.push(created); await created.done;
+  const backend = await createFileBackend(root); const db = await openDbsonl<number>(backend, 'multi');
+  const modern = await openDbsonl<number>(backend, 'modern', { create: true }); await modern.put('a', 1); await modern.close();
+  const refusal = child('node', 'refuse', '0', process.argv[3]!); children.push(refusal); await refusal.done;
   await db.put('counter', 0);
   const snapshot = await db.beginRead();
   const writers = ['node', process.argv[2]!].flatMap((runtime, id) => [child(runtime, 'increment', `new-${id}`), child(runtime, 'increment', `old-${id}`, process.argv[3]!)]);
@@ -43,5 +46,5 @@ try {
   await db.close();
   const reopened = await openDbsonl(await createFileBackend(root), 'multi');
   assert.equal((await reopened.stats()).cachePages, 0); await reopened.verify(); await reopened.close();
-  console.log(JSON.stringify({ multiProcess: 'Node and Bun, v0.2 and current concurrently', increments: 60, killedProcesses, atomicCrashBatches: 3, reopen: 'persistent index' }));
+  console.log(JSON.stringify({ multiProcess: 'Node and Bun, v0.2 and current concurrently on a format 2 database; v0.2 refuses format 3', increments: 60, killedProcesses, atomicCrashBatches: 3, reopen: 'persistent index' }));
 } finally { for (const worker of children) worker.process.kill('SIGKILL'); await rm(root, { recursive: true, force: true }); }

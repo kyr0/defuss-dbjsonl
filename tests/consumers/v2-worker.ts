@@ -2,6 +2,18 @@
 import { openDbsonl } from 'defuss-dbsonl';
 import { createFileBackend } from 'defuss-dbsonl/server';
 const [root, mode, id = '0'] = process.argv.slice(2);
+if (mode === 'create') {
+  // The older build creates the shared database, so older and current writers meet on format 2.
+  await (await openDbsonl<number>(await createFileBackend(root!), 'multi', { create: true })).close();
+  console.log('created'); process.exit(0);
+}
+if (mode === 'refuse') {
+  // An older build must refuse a format 3 database instead of reading or writing it.
+  let refused = false;
+  try { await openDbsonl<number>(await createFileBackend(root!), 'modern'); } catch (error) { refused = (error as { code?: string }).code === 'UNSUPPORTED'; }
+  if (!refused) throw new Error('The older build did not refuse a format 3 database.');
+  console.log('refused'); process.exit(0);
+}
 const db = await openDbsonl<number>(await createFileBackend(root!), 'multi');
 if (mode === 'increment') {
   for (let i = 0; i < 15; i++) {

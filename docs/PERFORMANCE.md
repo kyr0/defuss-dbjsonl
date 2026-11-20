@@ -43,42 +43,65 @@ VERIFIED: The 10000-record check is one run of `make bench-scale` in the 2026-11
 
 ## Compared with Redis on macOS arm64
 
-VERIFIED: Three consecutive runs of `mise exec -- make bench-redis` on 2026-11-16, on the host above, with Node 24.22.1, Bun 1.4.3, Redis 8.10.3 from the mise conda build (libc malloc) and the node-redis 5.12.1 client over loopback TCP. They measured the 0.5.0 source, on defuss-dson 1.4.0 and defuss-storage 0.3.1, before its version number changed, so the raw reports name 0.4.0. Other work kept the machine busy: the 1-minute load average, sampled when each worker started and ended, ranged from 5.5 to 10.9. Each run takes two warmups and seven measured rounds over 1000 records of about 130 JSON bytes, the engine that runs first alternates per round, and each engine's turn starts after a full garbage collection. The table shows the median of the three per-run medians in milliseconds per 1000 operations; a batch is one commit of 1000 writes, and the contended figure is the wall time until four writers have committed 1000 transfers together. All three raw reports are in `validation/bench-redis-macos-arm64.json`.
+VERIFIED: Three consecutive runs of `mise exec -- make bench-redis` on 2026-11-20, on the host above, with Node 24.22.1, Bun 1.4.3, Redis 8.10.3 from the mise conda build (libc malloc) and the node-redis 5.12.1 client over loopback TCP. They measured the 0.7.0 source with format 3, on defuss-dson 1.5.1 and defuss-storage 0.4.1. Other work kept the machine busy: the 1-minute load average, sampled when each worker started and ended, ranged from 9.9 to 19.7. Each run takes two warmups and seven measured rounds over 1000 records of about 130 JSON bytes, the engine that runs first alternates per round, and each engine's turn starts after a full garbage collection. An atomic batch is one commit of 5000 writes: it rewrites the 1000 records plus 4000 filler records of score 0 that no other workload reads, so both stores hold 5000 records after the first batch. The table shows the median of the three per-run medians, in milliseconds per 1000 operations and, for batches, per batch. The contended figure is the wall time until four writers have committed 1000 transfers together. The raw reports are in `validation/bench-redis-macos-arm64.json`, with three runs of the same day before the changes described below under `before`.
 
-VERIFIED: Durable pairs the native asynchronous file backend with Redis `appendonly yes` and `appendfsync always`. Volatile pairs the memory backend with Redis `appendonly no` and `save ""`. A transfer reads two keys and writes both: Redis sends `WATCH`, two `GET`s and `MULTI`, `SET`, `SET`, `EXEC`; defuss-dbsonl runs `transaction()`. Redis stores JSON strings and defuss-dbsonl encodes DSON. Each contending Redis writer has its own connection, because `WATCH` belongs to a connection; the four defuss-dbsonl writers share one database handle. Both retry on a conflict, and both keep the sum of all scores unchanged in every round.
+VERIFIED: Durable pairs the native asynchronous file backend with Redis `appendonly yes` and `appendfsync always`. Both engines empty the drive's cache before they answer. defuss-storage 0.4.1 flushes with `fcntl(F_FULLFSYNC)` under Node and Bun, which took 3.2 to 3.9 ms per flush on this host, where a plain `fsync` took 0.02 to 0.07 ms. A lone durable Redis transaction took 3.8 to 4.6 ms, which only a full flush explains. Volatile pairs the memory backend with Redis `appendonly no` and `save ""`. A transfer reads two keys and writes both: Redis sends `WATCH`, two `GET`s and `MULTI`, `SET`, `SET`, `EXEC`; defuss-dbsonl runs `transaction()`. Redis stores JSON strings and defuss-dbsonl encodes DSON. Each contending Redis writer has its own connection, because `WATCH` belongs to a connection; the four defuss-dbsonl writers share one database handle. Both retry on a conflict, and both keep the sum of all scores unchanged in every round.
 
-VERIFIED: The last column repeats the ratio from three runs of the 0.4.0 engine on defuss-storage 0.3.0, with the same script before it collected garbage between turns, at a load average of 10 to 23; their reports are in `validation/bench-redis-macos-arm64-baseline.json`. Redis itself ran at different speeds under the two loads, so only the ratios compare, not the milliseconds. A ratio below 1 means defuss-dbsonl took less time.
+VERIFIED: The last column repeats the ratio from three runs of 0.5.0 on 2026-11-16, at a load average of 5.5 to 10.9; their reports are in `validation/bench-redis-macos-arm64-0.5.0.json`, and those of 0.4.0 in `validation/bench-redis-macos-arm64-baseline.json`. It reads n/a where the protocol changed since: batches then carried 1000 writes, and durable commits under Bun then flushed with a plain `fsync`. Redis ran at different speeds under the two loads, so only the ratios compare, not the milliseconds. A ratio below 1 means defuss-dbsonl took less time.
 
-| Runtime | Mode | Workload | dbsonl ms | Redis ms | dbsonl / Redis | 0.4.0 ratio |
+| Runtime | Mode | Workload | dbsonl ms | Redis ms | dbsonl / Redis | 0.5.0 ratio |
 | --- | --- | --- | ---: | ---: | ---: | ---: |
-| Node | durable | Point read | 27.30 | 47.25 | 0.58 | 0.90 |
-| Node | durable | Atomic batch | 13.44 | 6.55 | 2.05 | 3.86 |
-| Node | durable | Transaction | 7572.99 | 3823.43 | 1.98 | 2.95 |
-| Node | durable | Contended transaction | 1945.98 | 2994.13 | 0.65 | 4.03 |
-| Node | volatile | Point read | 11.68 | 42.18 | 0.28 | 0.35 |
-| Node | volatile | Atomic batch | 5.37 | 2.46 | 2.18 | 5.77 |
-| Node | volatile | Transaction | 82.15 | 155.37 | 0.53 | 1.96 |
-| Node | volatile | Contended transaction | 63.33 | 76.39 | 0.83 | 6.39 |
-| Bun | durable | Point read | 32.45 | 39.24 | 0.83 | 1.15 |
-| Bun | durable | Atomic batch | 2.70 | 5.34 | 0.50 | 2.65 |
-| Bun | durable | Transaction | 427.50 | 3780.74 | 0.11 | 0.72 |
-| Bun | durable | Contended transaction | 165.85 | 3018.68 | 0.05 | 0.90 |
-| Bun | volatile | Point read | 20.05 | 44.14 | 0.45 | 0.35 |
-| Bun | volatile | Atomic batch | 2.25 | 1.39 | 1.61 | 2.61 |
-| Bun | volatile | Transaction | 93.13 | 206.50 | 0.45 | 2.48 |
-| Bun | volatile | Contended transaction | 68.64 | 84.00 | 0.82 | 8.98 |
+| Node | durable | Point read | 19.02 | 50.23 | 0.38 | 0.58 |
+| Node | durable | Atomic batch | 27.62 | 16.67 | 1.66 | n/a |
+| Node | durable | Transaction | 3862.51 | 3867.03 | 1.00 | 1.98 |
+| Node | durable | Contended transaction | 980.14 | 3042.93 | 0.32 | 0.65 |
+| Node | volatile | Point read | 14.44 | 46.59 | 0.31 | 0.28 |
+| Node | volatile | Atomic batch | 20.69 | 10.12 | 2.04 | n/a |
+| Node | volatile | Transaction | 101.79 | 173.57 | 0.59 | 0.53 |
+| Node | volatile | Contended transaction | 72.21 | 85.91 | 0.84 | 0.83 |
+| Bun | durable | Point read | 11.94 | 46.34 | 0.26 | 0.83 |
+| Bun | durable | Atomic batch | 19.29 | 12.33 | 1.56 | n/a |
+| Bun | durable | Transaction | 3965.32 | 3898.93 | 1.02 | n/a |
+| Bun | durable | Contended transaction | 1016.09 | 3244.96 | 0.31 | n/a |
+| Bun | volatile | Point read | 18.52 | 41.78 | 0.44 | 0.45 |
+| Bun | volatile | Atomic batch | 9.97 | 4.92 | 2.03 | n/a |
+| Bun | volatile | Transaction | 92.20 | 170.51 | 0.54 | 0.45 |
+| Bun | volatile | Contended transaction | 62.48 | 79.77 | 0.78 | 0.82 |
 
-VERIFIED: defuss-dbsonl took less time than Redis in 12 of the 16 pairings, against 4 for 0.4.0. No contending writer of either engine retried in these runs; 0.4.0 retried 1850 to 2890 times per 1000 commits.
+VERIFIED: defuss-dbsonl took less time than Redis in 11 of the 16 pairings. One of them, the lone durable Node transaction, is a tie: 3.86 against 3.87 ms, inside the spread of the runs, 3.83 to 3.90 against 3.76 to 3.89 ms. Redis took less time for all four batches, by 1.6 to 2.0 times, and for the lone durable Bun transaction, by 2%. No contending writer of either engine retried.
 
-VERIFIED: Collecting garbage before each turn changed the batch figures most. Without it, Redis batches under Bun took about 1 ms in rounds where Redis went first and 3.5 to 8 ms in rounds where it ran right after defuss-dbsonl, and defuss-dbsonl's Node batches took longer in rounds where they went second, because each engine's garbage was collected inside the other's timed work. The previous round, without collection, put Bun's memory batch at 0.47 of Redis's time; with collection Redis's batch stays near 1.4 ms and the ratio is 1.61.
+VERIFIED: Three changes since the runs under `before` took the durable figures down; the memory figures stayed within their spread. Durable point reads took 19 instead of 38 µs under Node and 12 instead of 47 µs under Bun, lone durable transactions 3.86 instead of 4.35 ms and 3.97 instead of 4.26 ms, and four contending writers 0.98 instead of 1.23 ms and 1.02 instead of 1.17 ms per commit.
 
-VERIFIED: Same-session probes attribute the gains since that round. defuss-dson 1.4.0 instead of a local plain-data encoder took 5% to 18% off point reads and 23% to 27% off Bun memory batches. Commit groups that wait for in-flight transactions (ARCH.md) took four contending durable Node writers from 4.4 to 2.1 ms per commit; they had alternated between groups of one and three. The index-page writer and the second-chance page cache took four contending memory writers from 59 to 49 µs per commit under Node.
+- Reads of up to 16 KiB are blocking calls with the default asynchronous I/O (`syncReadBytes`). A point read of a small value took a thread-pool round trip before. In an interleaved probe, 1000 durable point reads took 17 instead of 46 ms under Node and 23 instead of 48 ms under Bun.
+- The head and generation files stay open between commits (`src/kept-files.ts`). In a probe that timed every Storage and lock call of 200 lone Node transactions, opening and closing both files took about 1 ms of 5.84 ms; keeping them open took an interleaved lone transaction from 4.44 to 4.19 ms under Node and from 4.37 to 4.11 ms under Bun.
+- Holders of a shared lock on one connection share one flock. With blocking reads, four writers on one handle alternated between commit groups of one and three: the four transactions pin one generation, and three of them opened a lock descriptor of their own and closed it again on the thread pool, so they missed the next group. With one shared flock they form groups of four again, as `tests/commit-groups.test.ts` requires.
 
-VERIFIED: The durable Node batch and transaction lose because of flushes. A durable defuss-dbsonl commit flushes twice: the generation file, then the head slot in `publish()` in `src/core/io.ts`. Redis with `appendfsync always` flushes its log once before it answers `EXEC`. In a one-off probe of 300 writes of 4 KiB through the native Storage adapter, each followed by `flush()`, a write and its flush averaged 3.16 ms under Node and 0.044 ms under Bun on this host, so two Node flushes alone take longer than a Redis transaction. Four contending writers share both flushes in one group, and that pairing takes 0.65 of Redis's time.
+VERIFIED: Format 3 changed the durable transactions most, because a commit flushes once instead of twice. A lone Node transaction took 3.86 ms against 7.57 ms on 2026-11-16, and four contending Node writers 0.98 ms per commit against 1.95 ms. Under Bun the same workloads took 3.97 and 1.02 ms, against 0.43 and 0.17 ms with the plain `fsync` of the earlier round; that difference is the cost of the full flush, not of the engine.
 
-VERIFIED: The memory batches lose to encoding. In a CPU profile of a Node memory batch, encoding the 1000 values as DSON frames, with their CRC32C, took about 46% of the time and the index pages about 8%; Redis's client serializes with the runtime's built-in `JSON.stringify`.
+VERIFIED: A lone durable transaction cannot get far below Redis's time, because both pay one full flush per commit: in the traced probe above, the generation flush took 3.70 ms per transaction.
+
+VERIFIED: The point reads of the `before` runs, 38 µs under Node against 27 µs on 2026-11-16, lost to the machine's load, not to the engine or the larger database. In one process at a load average of 15 to 17, the 0.5.0 package and the build of those runs read 1000 durable keys in 50 and 46 ms under Node and in 59 and 55 ms under Bun, and adding the 4000 filler records to each batch moved neither build by more than its round-to-round spread.
+
+VERIFIED: In the 2026-11-16 round, collecting garbage before each turn changed the batch figures most. Without it, Redis batches under Bun took about 1 ms in rounds where Redis went first and 3.5 to 8 ms in rounds where it ran right after defuss-dbsonl, and defuss-dbsonl's Node batches took longer in rounds where they went second, because each engine's garbage was collected inside the other's timed work. The round before it, without collection, put Bun's memory batch of 1000 writes at 0.47 of Redis's time; with collection Redis's batch stayed near 1.4 ms and the ratio was 1.61.
+
+VERIFIED: Probes in the same session attributed the gains of the 2026-11-16 round over 0.4.0. defuss-dson 1.4.0 instead of a local plain-data encoder took 5% to 18% off point reads and 23% to 27% off Bun memory batches. Commit groups that wait for in-flight transactions (ARCH.md) took four contending durable Node writers from 4.4 to 2.1 ms per commit; they had alternated between groups of one and three. The index-page writer and the second-chance page cache took four contending memory writers from 59 to 49 µs per commit under Node.
+
+VERIFIED: The batches lose to encoding. In a CPU profile of 5000-write memory batches under Node on 2026-11-20, encoding the values as DSON frames took about 36% of the time, encoding index pages about 15% and editing the tree about 10%. DSON 1.3.0 stores strings as UTF-16 code units, which defuss-dson writes one character at a time in JavaScript; Redis's client serializes with the runtime's built-in `JSON.stringify`. Counting each batch's encoded bytes once instead of three times took the probe's batch from 14.4 to 12.5 to 12.8 ms; the benchmark's batch, timed nine times per run right after a full collection, stayed within its spread. Encoding in worker threads was probed and rejected, because the structured clone that carries a value to a worker changes what DSON accepts ([ARCH.md](../ARCH.md#parallel-scans)).
 
 VERIFIED: Rejected in these probes: splitting pages at 16 or 8 entries instead of 32 left contended memory commits within noise and made memory batches 10% to 30% slower; deduplicating objects by identity in the page writer cost a leaf 1.5 to 2 µs of its gain; inserting cached pages unmarked was slightly slower than marking them. An earlier commit delay that waited before setting the head new snapshots pin measured 3.90 to 3.92 ms per contended Node commit against 3.62 to 3.81 ms without it. Cutting small frames from shared slabs left batch times within run-to-run noise.
+
+## Node 26 against Node 24 on macOS arm64
+
+VERIFIED: On 2026-11-20, on the host above, `scripts/redis-worker.ts` ran the `make bench-redis` workloads with the 0.7.0 build under Node 24.22.1 and Node 26.13.1, both official builds installed by mise. Each mode had one throwaway Redis 8.10.3, and each ran three passes whose first runtime alternated, at a one-minute load average of 3.9 to 7.1. The table gives the median over the passes of Node 26's time divided by Node 24's in the same pass, with the range of the three ratios; below 1 means Node 26 took less time. The reports are in `validation/bench-node-versions-macos-arm64.json`.
+
+| defuss-dbsonl workload | Durable | Volatile |
+| --- | ---: | ---: |
+| Point read | 0.94 (0.78 to 1.02) | 1.01 (1.01 to 1.12) |
+| Batch of 5000 writes | 1.02 (0.90 to 1.08) | 1.01 (0.99 to 1.05) |
+| Lone transaction | 0.97 (0.97 to 1.02) | 0.99 (0.98 to 1.12) |
+| Four writers | 0.98 (0.96 to 1.02) | 1.01 (0.95 to 1.10) |
+
+VERIFIED: No workload was faster under Node 26 in every pass, and volatile point reads were slower in all three, by 1%, 12% and 1%. The Redis client in the same processes moved between 0.97 and 1.05 of its Node 24 time. The pinned toolchain therefore stays on Node 24.22.1; the test suite also passes under Node 26.13.1.
 
 ## Batch scans on macOS arm64
 
@@ -105,6 +128,38 @@ VERIFIED: The same session also measured `scanBatches` on defuss-dson 1.4.0 and 
 VERIFIED: defuss-dson 1.5.1 converts each frame offset to an int32 before reading. With 1.5.0, run offsets derived from decoded index pages, which are doubles in JavaScriptCore, took Bun off the decoder's int32 code: 503 type-speculation exits in its 32-bit reads, and `scanBatches` took 0.70 of 0.5.0's time on memory storage instead of 0.52, slower than without runs. Node was unaffected. Converting the offsets in defuss-dbsonl gave the same times as 1.5.1 does now, within 2%; the conversion lives in defuss-dson so that every caller gets it.
 
 VERIFIED: Most of what remains is decoding. In a CPU profile under Node on defuss-dson 1.4.0, of one process that loads the 100,000 documents into memory storage and then scans them ten times with `scanBatches`, defuss-dson took 74% of the time: decoding values, checking each frame's checksum, and setting up a reader and limits for every frame. defuss-dbsonl's own code took 14%. defuss-dson 1.5.0 removes most of the per-frame setup; the checksums and building each value remain.
+
+## Parallel scans on macOS arm64
+
+VERIFIED: Three consecutive runs of `mise exec -- make bench-parallel` on 2026-11-20, on an Apple M5 Max with 18 logical CPUs under macOS 25.6.0, with Node 24.22.1 and Bun 1.4.3, at a load average of 13 to 20 from other work. Each run writes 100,000 documents of four fields, as `make bench-scan` does, to the native file backend in batches of 5000. One thread runs `scanBatches` on a handle with `scanWorkers: 0`. Default pool runs `scanBatches` on a default backend, whose own pool of 4 workers scans and sends every row back to the calling thread. N workers is a warm pool of worker threads with a handle each that keep their rows: a round pins a snapshot, splits it into N ranges, sends each worker the head and one range, and ends when every worker has scanned its range and closed its pin. One untimed warmup checks that every case returns the same count and checksum, then seven rounds alternate the order of the cases, each after a full garbage collection on the main thread. Every handle uses the same I/O mode and cache: the default 1024 pages, or 16384 pages and 256 MiB, which hold the whole index. The table shows the median of the three per-run medians in milliseconds per full scan. The raw reports are in `validation/bench-parallel-macos-arm64.json`.
+
+| Runtime | I/O | Cache | One thread | Default pool | 1 worker | 2 workers | 4 workers | 8 workers |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Node | async | default | 401 | 105 | 364 | 215 | 145 | 26 |
+| Node | async | whole index | 130 | 79 | 116 | 66 | 34 | 22 |
+| Node | sync | default | 238 | 108 | 227 | 132 | 80 | 20 |
+| Node | sync | whole index | 121 | 79 | 108 | 59 | 31 | 22 |
+| Bun | async | default | 418 | 113 | 417 | 231 | 122 | 31 |
+| Bun | async | whole index | 116 | 82 | 122 | 62 | 35 | 32 |
+| Bun | sync | default | 265 | 118 | 260 | 143 | 73 | 27 |
+| Bun | sync | whole index | 111 | 80 | 104 | 60 | 32 | 28 |
+
+VERIFIED: With the defaults, the default pool scanned 3.8 times faster than one thread under Node and 3.7 times under Bun. Part of that is the page cache: one thread decodes every leaf page again on each scan, while each worker's share of the index fits in its own cache. With the whole index cached, the pool gained 1.6 times under Node and 1.4 times under Bun, because the calling thread decodes every row's structured clone. Workers that keep their rows show decoding alone spread over threads: Node scanned 2.1, 3.9 and 5.5 times faster with 2, 4 and 8 synchronous workers, Bun 1.9, 3.5 and 4.0 times. Synchronous reads helped most where pages miss the cache, because asynchronous reads queue on the one libuv thread pool of the process. The machine was busy, so the 8-worker figures carry the most noise.
+
+VERIFIED: The 5000-row threshold comes from a probe on 2026-11-20 on the same host and data shape: full scans of databases of 2000 to 100,000 documents, nine alternating rounds each, default backend options, a warm pool of 4 workers against one thread, medians in milliseconds.
+
+| Runtime | Rows | One thread | Pool |
+| --- | ---: | ---: | ---: |
+| Node | 2000 | 4.9 | 5.3 |
+| Node | 5000 | 6.3 | 5.3 |
+| Node | 10,000 | 13.1 | 9.8 |
+| Node | 20,000 | 70.3 | 18.1 |
+| Node | 100,000 | 330.5 | 93.2 |
+| Bun | 2000 | 3.6 | 4.8 |
+| Bun | 5000 | 7.4 | 5.3 |
+| Bun | 10,000 | 13.6 | 9.2 |
+| Bun | 20,000 | 103.0 | 20.1 |
+| Bun | 100,000 | 450.5 | 118.7 |
 
 ## Linux x64: v0.2 and v0.3
 

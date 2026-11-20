@@ -109,11 +109,11 @@ test.skipIf(process.platform !== 'linux' && process.platform !== 'darwin')('nati
     expect(await descriptors()).toBe(0);
     const db = await openDbsonl(backend, 'bounded', { create: true }); await db.put('x', 1);
     for (let i = 0; i < 32; i++) await db.get('x');
-    // Two read descriptors (head, generation) plus one idle lock descriptor each for commit, the head's
-    // and the generation's io lock, and the generation pin.
-    expect(await descriptors()).toBeLessThanOrEqual(6);
+    // Two read descriptors (head, generation), the kept head and generation files, plus one idle lock descriptor
+    // each for commit, the head's and the generation's io lock, and the generation pin.
+    expect(await descriptors()).toBeLessThanOrEqual(8);
     for (let i = 0; i < 5; i++) { await db.compact(); await db.collect(); await db.get('x'); }
-    expect(await descriptors()).toBeLessThanOrEqual(6);
+    expect(await descriptors()).toBeLessThanOrEqual(8);
     await db.close(); expect(await descriptors()).toBe(0);
     await symlink(resolve(root, 'bounded.head'), resolve(root, 'linked.head'));
     await expect(openDbsonl(backend, 'linked')).rejects.toMatchObject({ code: 'UNSUPPORTED' });

@@ -8,10 +8,10 @@ import { createClient, WatchError } from 'redis';
 import type { Dbsonl } from '../src/index.js';
 
 type Value = { score: number; text: string };
-const [mode = '', portText = '', output = '', roundsText = '7', sizeText = '1000'] = process.argv.slice(2);
-const port = Number(portText), rounds = Number(roundsText), count = Number(sizeText);
-if (!['durable', 'volatile'].includes(mode) || !Number.isSafeInteger(port) || !output || !Number.isSafeInteger(rounds) || rounds < 1 || !Number.isSafeInteger(count) || count < 2 || count > 10000) {
-  throw new Error('Usage: redis-worker.ts durable|volatile REDIS_PORT OUTPUT ROUNDS RECORDS(2..10000)');
+const [mode = '', portText = '', output = '', roundsText = '7', sizeText = '1000', batchText = '5000'] = process.argv.slice(2);
+const port = Number(portText), rounds = Number(roundsText), count = Number(sizeText), batchSize = Number(batchText);
+if (!['durable', 'volatile'].includes(mode) || !Number.isSafeInteger(port) || !output || !Number.isSafeInteger(rounds) || rounds < 1 || !Number.isSafeInteger(count) || count < 2 || count > 10000 || !Number.isSafeInteger(batchSize) || batchSize < count || batchSize > 100000) {
+  throw new Error('Usage: redis-worker.ts durable|volatile REDIS_PORT OUTPUT ROUNDS RECORDS(2..10000) BATCH(RECORDS..100000)');
 }
 // durable pairs a flushed file commit with Redis appendfsync always; volatile pairs memory storage with Redis without persistence.
 const { openDbsonl, createMemoryBackend } = await import(pathToFileURL(resolve('dist/index.mjs')).href);
@@ -20,6 +20,9 @@ const writers = 4, perWriter = Math.floor(count / writers);
 const keys = Array.from({ length: count }, (_, i) => `k${i}`);
 const input = keys.map((key, score) => ({ operation: 'put' as const, key, value: { score, text: 'record '.repeat(16) } }));
 const total = (count * (count - 1)) / 2;
+// The batch rewrites the benchmark records, which resets their scores, plus filler records of score 0 that no other
+// workload reads, so one commit carries batchSize writes and the score sum stays the same.
+const batch = [...input, ...Array.from({ length: batchSize - count }, (_, i) => ({ operation: 'put' as const, key: `fill${i}`, value: { score: 0, text: 'record '.repeat(16) } }))];
 const check = (value: Value | undefined, i: number) => { if (value?.score !== i || value.text !== input[i]!.value.text) throw new Error('Wrong benchmark value.'); };
 const pair = (i: number) => { const a = (i * 7919) % count; return [keys[a]!, keys[(a + 1) % count]!] as const; };
 
@@ -36,7 +39,7 @@ const json = (text: string | null) => (text === null ? undefined : JSON.parse(te
 /** Each engine implements the same four workloads; transfers move one point of score between two keys. */
 const engines = {
   dbsonl: {
-    batch: async () => { await db.batch(input); },
+    batch: async () => { await db.batch(batch); },
     get: async (i: number) => (await db.get(keys[i]!)).value as Value | undefined,
     transfer: async (_writer: number, from: string, to: string) => {
       await db.transaction(async tx => {
@@ -51,7 +54,7 @@ const engines = {
     },
   },
   redis: {
-    batch: async () => { const multi = redis.multi(); for (const { key, value } of input) multi.set(key, JSON.stringify(value)); await multi.exec(); },
+    batch: async () => { const multi = redis.multi(); for (const { key, value } of batch) multi.set(key, JSON.stringify(value)); await multi.exec(); },
     get: async (i: number) => json(await redis.get(keys[i]!)),
     transfer: async (writer: number, from: string, to: string) => {
       const client = writer < 0 ? redis : writerClients[writer]!;
@@ -107,7 +110,7 @@ try {
   const version = JSON.parse(await readFile('package.json', 'utf8')).version as string;
   const server = (await redis.info('server')).match(/redis_version:(\S+)/)?.[1];
   const runtime = typeof (globalThis as { Bun?: unknown }).Bun === 'undefined' ? `node ${process.versions.node}` : `bun ${process.versions.bun}`;
-  await writeFile(output, JSON.stringify({ mode, runtime, dbsonl: version, redis: server, records: count, writers, rounds, warmupRounds: 2, loadavg: load, generatedAt: new Date().toISOString(), metrics }, null, 2) + '\n');
+  await writeFile(output, JSON.stringify({ mode, runtime, dbsonl: version, redis: server, records: count, batchWrites: batchSize, writers, rounds, warmupRounds: 2, loadavg: load, generatedAt: new Date().toISOString(), metrics }, null, 2) + '\n');
   console.log(`${new Date().toISOString()} INFO redis comparison mode=${mode} runtime=${runtime} transaction_dbsonl_ms=${summary(samples.dbsonl.transaction!).medianMs.toFixed(1)} transaction_redis_ms=${summary(samples.redis.transaction!).medianMs.toFixed(1)}`);
 } finally {
   await Promise.allSettled([redis, ...writerClients].map(client => client.quit()));

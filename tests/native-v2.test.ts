@@ -24,15 +24,20 @@ test('independent native backends serialize writes and hold shared snapshot pins
 test.skipIf(process.getuid?.() === 0)('real manifest permission failure reports uncertainty and preserves the prior commit', async () => {
   const root = await mkdtemp(resolve('tmp/publication-'));
   try {
-    const backend = await createFileBackend(root); const db = await openDbsonl(backend, 'publish', { create: true });
+    const backend = await createFileBackend(root); let db = await openDbsonl(backend, 'publish', { create: true });
     await db.put('a', 1);
+    // An open handle keeps its files open, and permissions apply to the next open: reopen after the change.
+    await db.close();
     await chmod(resolve(root, 'publish.head'), 0o444);
+    db = await openDbsonl(backend, 'publish');
     try {
       await expect(db.batch([{ operation: 'put', key: 'a', value: 2 }, { operation: 'put', key: 'b', value: 3 }])).rejects.toMatchObject({ code: 'COMMIT_UNCERTAIN' });
       expect((await db.get('a')).value).toBe(1); expect((await db.get('b')).found).toBe(false);
       await expect(db.compact()).rejects.toMatchObject({ code: 'COMMIT_UNCERTAIN' });
     } finally { await chmod(resolve(root, 'publish.head'), 0o600); }
-    await db.put('next', 4); expect(await db.verify()).toMatchObject({ count: 2, revision: 2 });
-    expect((await db.collect()).removed.length).toBe(1); await db.close();
+    // Format 3: the uncertain batch reached the generation with its commit record, so the next writer adopts it.
+    await db.put('next', 4); expect(await db.verify()).toMatchObject({ count: 3, revision: 3 }); expect((await db.get('a')).value).toBe(2);
+    // Compaction failed adopting that batch, before it wrote a candidate generation, so nothing is left to reclaim.
+    expect((await db.collect()).removed).toEqual([]); await db.close();
   } finally { await rm(root, { recursive: true, force: true }); }
 });

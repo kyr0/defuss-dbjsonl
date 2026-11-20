@@ -28,10 +28,12 @@ const compile = async (source: string, destination: string, format: 'esm' | 'cjs
   writeFile(resolve(consumer, destination), (await transform(await readFile(source, 'utf8'), { loader: 'ts', format, target: 'es2022' })).code);
 // Examples are taken from the installed package, proving they ship and run against its exports.
 for (const name of ['basic', 'transaction']) { await compile(resolve(consumer, `node_modules/defuss-dbsonl/examples/${name}.ts`), `${name}.js`); run('node', [`${name}.js`], consumer); }
-for (const name of ['esm', 'v2', 'v2-worker']) await compile(`tests/consumers/${name}.ts`, `${name}.js`);
+for (const name of ['esm', 'v2', 'v2-worker', 'parallel', 'parallel-worker']) await compile(`tests/consumers/${name}.ts`, `${name}.js`);
 await compile('tests/consumers/v2-cjs.cts', 'v2-cjs.cjs', 'cjs');
 const runtimes = [JSON.parse(run('node', ['esm.js'], consumer)), JSON.parse(run(bun, ['esm.js'], consumer))];
 run('node', ['v2-cjs.cjs'], consumer); run(bun, ['v2-cjs.cjs'], consumer);
+// Worker threads scan split() ranges of one pinned native snapshot under both runtimes.
+const parallel = [JSON.parse(run('node', ['parallel.js'], consumer)), JSON.parse(run(bun, ['parallel.js'], consumer))];
 // Consume the previously shipped artifact as well: format compatibility includes
 // live lock interoperability, not merely reopening a copied fixture.
 const baselineTarball = resolve('vendor/defuss-dbsonl-0.2.0.tgz');
@@ -89,8 +91,11 @@ try {
     };
     await Promise.all([call('/v2.js', 'a'), call('/v2.js', 'b')]);
     await call('/v2.js', 'verify');
+    await Promise.all([call('/v2.js', 'scan'), call('/v2.js', 'scan'), call('/v2.js', 'scan'), call('/v2.js', 'write')]);
+    const split = await call('/v2.js', 'split');
+    if (split.ranges !== 3 || !split.rows) throw new Error(`Split scan returned ${JSON.stringify(split)}.`);
     await call('/v2.js', 'directory');
-    return { opfs: '30 concurrent worker transactions, snapshot isolation and compaction', restart: 'verified in a different worker', directory: 'transaction on a directory handle' };
+    return { opfs: '30 concurrent worker transactions, snapshot isolation and compaction', parallel: 'three scanning workers beside a writing, compacting worker', split: `${split.rows} rows in 3 ranges of one pinned snapshot, scanned by nested workers`, restart: 'verified in a different worker', directory: 'transaction on a directory handle' };
   });
   // Every interactive element of the website runs once against the packed build.
   const errors: string[] = [];
@@ -136,9 +141,9 @@ try {
   // The Redis comparison: ECharts, pinned and integrity-checked, draws both dumbbell charts; the gauges open on Bun
   // flushed to disk and follow the runtime and storage switches, with one button of each group pressed.
   await page.waitForFunction(() => document.querySelectorAll('#redis .chart svg').length === 2, undefined, { timeout: 30000 });
-  await page.waitForFunction(() => document.querySelector('#vs-contended .tacho-value')?.textContent === '18× faster');
+  await page.waitForFunction(() => document.querySelector('#vs-contended .tacho-value')?.textContent === '3.2× faster');
   for (const value of ['node', 'volatile', 'volatile']) await page.click(`#redis .toggle[data-value="${value}"]`);
-  await page.waitForFunction(() => document.querySelector('#vs-get .tacho-value')?.textContent === '3.6× faster' && document.querySelector('#vs-get-times')?.textContent === '12 µs against 42 µs');
+  await page.waitForFunction(() => document.querySelector('#vs-get .tacho-value')?.textContent === '3.2× faster' && document.querySelector('#vs-get-times')?.textContent === '14 µs against 47 µs');
   const pressed = await page.$$eval('#redis .toggle[aria-pressed="true"]', toggles => toggles.map(toggle => (toggle as HTMLElement).dataset.value).join(' '));
   if (pressed !== 'node volatile') throw new Error(`Website comparison switches show ${pressed} pressed.`);
   // ECharts replaces a chart container's aria-label with a generated text unless the option passes the authored one.
@@ -178,7 +183,7 @@ try {
     if (!(await readFile(resolve(output, 'site/assets', file))).equals(await readFile(resolve('docs/assets', file)))) throw new Error(`docs/assets/${file} is stale; run make site.`);
   }
   Object.assign(result, { website: 'snapshot, conflict, DSON and OPFS demos; reload persistence; delete then add; silent worker replaced; install tabs; Redis gauges, switches and charts' });
-  const report = { package: `defuss-dbsonl@${version}`, generatedAt: new Date().toISOString(), runtimes, v2, commonjs: ['Node', 'Bun'], declarations: 'no DOM or Node ambient types', browser: { name: 'Chromium', version: browser.version(), ...result } };
+  const report = { package: `defuss-dbsonl@${version}`, generatedAt: new Date().toISOString(), runtimes, v2, parallel, commonjs: ['Node', 'Bun'], declarations: 'no DOM or Node ambient types', browser: { name: 'Chromium', version: browser.version(), ...result } };
   await writeFile(resolve(output, 'e2e.json'), JSON.stringify(report, null, 2) + '\n');
   console.log(`Node, Bun, ESM, CommonJS, declaration checks, Chromium ${browser.version()} and WebKit at iPhone size passed.`);
 } finally { await browser?.close(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }

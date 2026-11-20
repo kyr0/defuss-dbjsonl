@@ -27,21 +27,12 @@ Wrap: EVERY lead becomes a test | .vae/VERIFY.py rule | one MEMORY line with BC,
 2026-11-15T16:09:19Z s=afa01d3f FINDING docs/index.html:hero rotate learn=none: Component limit documented in its CSS.
 2026-11-15T16:10:10Z s=afa01d3f FINDING docs/index.html:#why open card learn=none: Copy accuracy; checked against ARCH.md and the benchmark file.
 2026-11-15T16:22:10Z s=afa01d3f FINDING docs/index.html:#tests rings learn=none: Component behavior read from its source; one-off markup.
-2026-11-15T16:24:56Z s=afa01d3f DONE fp=687e2d8a3383 cov=97.9% paths=CHANGELOG.md,Makefile,README.md,docs/PERFORMANCE.md(+14)
 2026-11-15T16:24:56Z s=afa01d3f FINDING scripts/bench.ts:baselines learn=none: Benchmark harness change; checksum mismatch throws before measuring, which is the mechanical guard.
-2026-11-15T16:31:44Z s=afa01d3f DONE fp=9a69bd6697f6 cov=97.9% paths=CHANGELOG.md,Makefile,README.md,docs/PERFORMANCE.md(+15)
 2026-11-15T16:31:44Z s=afa01d3f FINDING docs/PERFORMANCE.md:3 B01 learn=none: Root cause not established; no regression test before the cause is known (timing assertions are banned in correctness tests by tests/ARCH.md). Raised to the hum
-2026-11-15T17:13:42Z s=afa01d3f DONE fp=89cd6e38f4e4 cov=97.9% paths=docs/index.html
 2026-11-15T17:13:42Z s=afa01d3f FINDING docs/index.html:hero transfer.ts learn=none: Example copy checked against docs/API.md and the demo behavior covered by make e2e.
-2026-11-15T17:14:05Z s=afa01d3f DONE fp=8696f346acff cov=97.9% paths=docs/index.html
 2026-11-15T17:14:05Z s=afa01d3f FINDING docs/index.html:#stack learn=none: One-off link.
-2026-11-15T17:15:10Z s=afa01d3f DONE fp=5ea587c862f4 cov=97.9% paths=docs/PERFORMANCE.md,docs/index.html
 2026-11-15T17:15:10Z s=afa01d3f FINDING docs/index.html:#performance learn=none: Label copy; Node.js embeds V8 and Bun embeds JavaScriptCore.
-2026-11-16T11:11:19Z s=85830ead FAIL prose,tests.e2e.1
-2026-11-16T11:43:21Z s=85830ead FAIL tests.e2e.1
-2026-11-16T11:46:21Z s=85830ead DONE fp=f666524387df cov=97.9% paths=CHANGELOG.md,Makefile,README.md,bun.lock(+14)
 2026-11-16T11:46:21Z s=85830ead FINDING scripts/bench-redis.ts:configGet dir learn=none: The guard itself is the mechanical check and runs on every make bench-redis.
-2026-11-16T11:46:21Z s=85830ead FINDING scripts/e2e.ts:WebKit pass learn=test: make e2e now drives both.
 2026-11-16T11:46:21Z s=85830ead FINDING scripts/e2e.ts:db-sheet wait learn=none: One-off test-code defect; the passing e2e run covers it.
 2026-11-16T11:46:21Z s=85830ead FINDING site/opfs.worker.ts:open learn=none: Whether a transient open failure caused the iPhone report is not established; no device was available.
 2026-11-16T11:46:21Z s=85830ead FINDING site/ARCH.md:9 L01 learn=none: Wording fix.
@@ -51,44 +42,21 @@ Wrap: EVERY lead becomes a test | .vae/VERIFY.py rule | one MEMORY line with BC,
 2026-11-16T11:46:21Z s=85830ead FINDING docs/index.html:.db-install .tab-list learn=none: Visual layout; e2e asserts no sideways page scroll, not label truncation.
 2026-11-16T11:46:21Z s=85830ead FINDING docs/index.html:.db-points learn=none: Visual layout.
 2026-11-16T11:46:21Z s=85830ead FINDING scripts/redis-worker.ts:connect learn=none: Comment only.
-2026-11-16T14:41:29Z s=85830ead FAIL tests.e2e.1
-2026-11-16T15:04:31Z s=85830ead DONE fp=8c3f1625d53b cov=98.1% paths=ARCH.md,CHANGELOG.md,Makefile,README.md(+24)
 2026-11-16T15:04:31Z s=85830ead FINDING src/core/tree.ts:BatchTree.finish, src/core/store.ts:commit learn=none: Only a tree-construction defect could trigger it; no real input produces an invalid page to test with.
-2026-11-16T15:04:31Z s=85830ead FINDING tests/native-performance.test.ts:descriptor test learn=test: The bound is the documented resource contract (docs/API.md, ARCH.md) and now runs on both platforms.
-2026-11-16T15:04:31Z s=85830ead FINDING src/server.ts:connect.retire learn=test: The descriptor test counts descriptors under the database root after five compact+collect cycles.
-2026-11-16T15:04:31Z s=85830ead FINDING docs/assets/demo.js, docs/assets/opfs.worker.js learn=test: The e2e byte comparison already catches it.
-2026-11-16T15:04:31Z s=85830ead FINDING gate tests.e2e.1 goto timeout learn=memory: CLI_GIST line: keep the turn open until bench-redis ends.
-2026-11-16T16:02:49Z s=85830ead DONE fp=e2c829653ed9 cov=97.8% paths=ARCH.md,CHANGELOG.md,Makefile,README.md(+28)
 2026-11-16T16:02:49Z s=85830ead FINDING src/core/store.ts:drain learn=none: A test that queued the commit from the cancelled member's rejection handler passed with and without the fix; the window depends on microtask order inside the co
 2026-11-16T16:02:49Z s=85830ead FINDING src/core/store.ts:close learn=none: Release after connection close was already handled by the release function; no deterministic failing case observed.
-2026-11-16T16:02:49Z s=85830ead FINDING src/core/codec.ts:frame learn=test: Byte comparison after the reset catches stale table entries.
 2026-11-16T16:02:49Z s=85830ead FINDING src/core/store.ts:awaitSiblings (removed) learn=none: Documented in docs/PERFORMANCE.md as a rejected experiment.
 2026-11-16T16:02:49Z s=85830ead FINDING src/core/codec.ts:allocate (removed) learn=none: Documented in docs/PERFORMANCE.md.
 2026-11-16T16:02:49Z s=85830ead FINDING tests/commit-groups.test.ts learn=none: Test code only.
-2026-11-16T16:02:49Z s=85830ead FINDING tests/codec.test.ts:generator learn=test: The generator exercises the edge directly.
-2026-11-16T17:42:02Z s=85830ead FAIL tests.e2e.1
-2026-11-16T17:59:39Z s=85830ead DONE fp=2a352924b1b4 cov=97.5% paths=ARCH.md,CHANGELOG.md,Makefile,README.md(+26)
 2026-11-16T17:59:39Z s=85830ead FINDING src/core/io.ts:publish, Appender.value; src/core/store.ts:encode learn=none: Cross-version reading stays gated by make e2e, which runs the 0.2.0 tarball with its own defuss-dson 1.3.0 concurrently with the new build on one database.
 2026-11-16T17:59:39Z s=85830ead FINDING validation/bench-redis-macos-arm64.json learn=none: Process-to-process variance under Bun; the isolated checked read loop was faster on 1.4.0 (8.6-15 vs 20-24 ms).
-2026-11-16T17:59:39Z s=85830ead FINDING .vae/CLI_GIST.md learn=memory: CLI_GIST now says a Monitor or background wait does not keep the turn open.
-2026-11-16T19:03:10Z s=85830ead DONE fp=3c3dc90aaa1f cov=97.7% paths=ARCH.md,CHANGELOG.md,Makefile,README.md(+28)
-2026-11-16T19:03:10Z s=85830ead FINDING src/core/store.ts:drain/gather learn=test: commit-groups.test.ts 'full groups' fails without gather (50 publications for 100 commits) and passes with it (<= 35).
-2026-11-16T19:03:10Z s=85830ead FINDING src/core/store.ts:gather bound learn=test: commit-groups.test.ts 'keeps its snapshot open' runs 20 puts while a transaction waits on a gate and asserts it is still pending afterwards.
 2026-11-16T19:03:10Z s=85830ead FINDING src/core/store.ts:drain readHead learn=none: Equivalent outcome by code reading; retries in publishGroup still pass no head and re-read it.
-2026-11-16T19:03:10Z s=85830ead FINDING src/core/store.ts:cached/remember learn=test: mvcc.test.ts still bounds cachePages and cacheBytes at 2 pages and 1024 bytes.
-2026-11-16T19:03:10Z s=85830ead FINDING src/core/page.ts learn=test: page.test.ts; make e2e has 0.2.0 on DSON 1.3.0 read the frames concurrently.
 2026-11-16T19:03:10Z s=85830ead FINDING scripts/redis-worker.ts:collect learn=none: Documented in docs/PERFORMANCE.md: it turned Bun's memory batch from 0.47 to 1.61 of Redis's time.
 2026-11-16T19:03:10Z s=85830ead FINDING tree.ts split threshold (probe, reverted) learn=none: Documented as rejected in docs/PERFORMANCE.md.
-2026-11-16T19:03:10Z s=85830ead FINDING .vae/CLI_GIST.md learn=memory: CLI_GIST line 'redis probes'.
-2026-11-16T19:37:01Z s=85830ead DONE fp=43ef50f1b78a cov=97.7% paths=ARCH.md,CHANGELOG.md,Makefile,README.md(+28)
 2026-11-16T19:37:01Z s=85830ead FINDING package.json:version learn=none: Version bump only; no code path changed.
-2026-11-16T19:57:55Z s=a4ea8ca3 DONE fp=02e07bd46195 cov=98.4% paths=CHANGELOG.md,README.md,docs/PERFORMANCE.md,docs/index.html(+5)
 2026-11-16T19:57:55Z s=a4ea8ca3 FINDING README.md:17 (B evidence) learn=none: Prose evidence slip; not mechanically checkable.
 2026-11-16T19:57:55Z s=a4ea8ca3 FINDING docs/index.html: What you get, Guarantees, conflict demo, page-cache and several-writers cards (L logic) learn=none: Semantic doc drift; no deterministic rule distinguishes old from new wording.
-2026-11-16T19:57:55Z s=a4ea8ca3 FINDING tests/contracts.test.ts:coordinator test learn=test: The fixed test itself covers the cancelled native wait.
 2026-11-16T19:57:55Z s=a4ea8ca3 FINDING docs/PERFORMANCE.md macOS section (B evidence) learn=none: Prose evidence slip.
-2026-11-16T21:13:21Z s=a4ea8ca3 DONE fp=543003b319f9 cov=98.4% paths=CHANGELOG.md,README.md,docs/PERFORMANCE.md,docs/index.html(+8)
-2026-11-16T21:13:21Z s=a4ea8ca3 FINDING docs/index.html:dumbbell (chart mount) learn=test: scripts/e2e.ts asserts both chart descriptions in Chromium; the check failed on the previous markup per the probe.
 2026-11-16T21:13:21Z s=a4ea8ca3 FINDING docs/index.html:.db-vs-gauge learn=test: make e2e already fails on sideways scroll at iPhone size and now waits for both charts before measuring.
 2026-11-16T21:13:21Z s=a4ea8ca3 FINDING docs/index.html:Redis comparison script guard learn=none: A CDN outage is not reproducible in e2e without blocking the request; proportionate check would mock the network, which the project rules forbid.
 2026-11-16T21:13:21Z s=a4ea8ca3 FINDING docs/index.html:RUNS learn=none: Figures change only with a new benchmark run; a test pinning them would pin values that worked once.
@@ -106,3 +74,35 @@ Wrap: EVERY lead becomes a test | .vae/VERIFY.py rule | one MEMORY line with BC,
 2026-11-17T00:12:30Z s=a4ea8ca3 FINDING src/core/store.ts:scanBatches run decode learn=test: Covered by the new batches test.
 2026-11-17T00:40:14Z s=a4ea8ca3 DONE fp=743c0f73c4af cov=98.4% paths=CHANGELOG.md,Makefile,README.md,bun.lock(+26)
 2026-11-17T00:40:14Z s=a4ea8ca3 FINDING src/core/io.ts:readCachedValues learn=none: Simplification; behavior covered by the existing batches test.
+2026-11-20T04:16:45Z s=ad85a3b9 FAIL tests.e2e.1
+2026-11-20T05:04:32Z s=ad85a3b9 FAIL lint
+2026-11-20T05:06:19Z s=ad85a3b9 FAIL tests.e2e.1
+2026-11-20T05:09:19Z s=ad85a3b9 DONE fp=92dd8b91de0d cov=93.6% paths=ARCH.md,CHANGELOG.md,Makefile,README.md(+34)
+2026-11-20T05:09:19Z s=ad85a3b9 FINDING src/scan-pool.ts:createScanPool start() learn=test: tests/scan-workers.test.ts times out if worker messages stop arriving.
+2026-11-20T05:09:19Z s=ad85a3b9 FINDING src/core/store.ts:ReadSession.parallel learn=none: A timing regression; correctness is covered by the limit cases in tests/scan-workers.test.ts, and speed belongs to make bench-parallel, not a timed test.
+2026-11-20T05:09:19Z s=ad85a3b9 FINDING tsconfig.browser.json exclude learn=verifier: make lint runs the browser typecheck and fails on the same mistake.
+2026-11-20T05:30:47Z s=ad85a3b9 DONE fp=81041fa405e2 cov=93.4% paths=ARCH.md,CHANGELOG.md,Makefile,README.md(+42)
+2026-11-20T05:30:47Z s=ad85a3b9 FINDING src/core/io.ts:recoverTail learn=test: tests/format3.test.ts reopens with maxRecordBytes 1024 after a 600 KB value and expects both later commits.
+2026-11-20T05:30:47Z s=ad85a3b9 FINDING src/core/store.ts:settledHead and publishGroup Recovered branch learn=test: The permission test expects COMMIT_UNCERTAIN from compaction.
+2026-11-20T05:30:47Z s=ad85a3b9 FINDING tests/consumers/v2.ts learn=test: make e2e runs both checks from the packed package.
+2026-11-20T05:30:47Z s=ad85a3b9 FINDING src/core/store.ts:batchBytes/parallel scan, src/scan-pool.ts learn=none: A design decision recorded in ARCH.md; no code was added.
+2026-11-20T06:42:43Z s=ad85a3b9 FAIL tests.e2e.1
+2026-11-20T06:47:03Z s=ad85a3b9 DONE fp=ab41e4356dc7 cov=93.5% paths=ARCH.md,CHANGELOG.md,Makefile,README.md(+47)
+2026-11-20T06:47:03Z s=ad85a3b9 FINDING src/kept-files.ts:open learn=test: tests/native-performance.test.ts and tests/kept-files.test.ts use two backends with different limits on one database.
+2026-11-20T06:47:03Z s=ad85a3b9 FINDING src/server.ts:acquireNative (shared pins) learn=test: tests/commit-groups.test.ts bounds publications to 35 per 100 commits; it failed with 49 before the fix.
+2026-11-20T06:47:03Z s=ad85a3b9 FINDING src/kept-files.ts:track learn=test: tests/native-performance.test.ts expects 0 descriptors right after close.
+2026-11-20T06:47:03Z s=ad85a3b9 FINDING tests/native-v2.test.ts:permission learn=test: The test exercises the real EACCES publication path again.
+2026-11-20T06:47:03Z s=ad85a3b9 FINDING ARCH.md#parallel-scans learn=none: Documentation omission, no code.
+2026-11-20T06:47:03Z s=ad85a3b9 FINDING scripts/e2e.ts:Redis gauges learn=none: The assertion follows the published data by design.
+2026-11-20T13:19:22Z s=dbsonl-r FAIL tests.e2e.1
+2026-11-20T13:23:14Z s=dbsonl-r DONE fp=553e1014a834 cov=93.6% paths=ARCH.md,CHANGELOG.md,Makefile,README.md(+47)
+2026-11-20T13:23:14Z s=dbsonl-r FINDING src/core/store.ts:publishGroup (Recovered branch) learn=test: tests/format3.test.ts 'a write rejected before recovery stays rejected when its group is checked again' fails on memory and native storage without the fix and p
+2026-11-20T13:23:14Z s=dbsonl-r FINDING src/core/store.ts:ReadSession.parallel; src/core/tree.ts:split learn=none: A timing bound would pin this machine's speed; tests/scan-workers.test.ts now also runs {gte, limit} through the new planning path and compares rows with one th
+2026-11-20T13:23:14Z s=dbsonl-r FINDING CHANGELOG.md:13 B learn=none: One-off wording left from the 0.4.0 bump.
+2026-11-20T13:23:14Z s=dbsonl-r FINDING CHANGELOG.md:17 B learn=none: Figures were replaced in PERFORMANCE.md after the changelog line was written.
+2026-11-20T13:23:14Z s=dbsonl-r FINDING README.md:3 P learn=none: Version bump missed in the intro sentence.
+2026-11-20T13:23:14Z s=dbsonl-r FINDING src/core/io.ts:publish; src/core/backend.ts:locked; src/core/types.ts:ParallelScanRequest learn=none: Found by the docs stage's per-function check, which covers this class.
+2026-11-20T13:24:02Z s=ad85a3b9 FAIL tests.unit,coverage
+2026-11-20T13:44:20Z s=dbsonl-r DONE fp=197de4a4bb40 cov=93.5% paths=ARCH.md,CHANGELOG.md,Makefile,README.md(+49)
+2026-11-20T13:44:20Z s=dbsonl-r FINDING src/server.ts:spawnScanWorker; src/core/{common,io,tree,store}.ts constructors; tsconfig.json learn=verifier: make lint runs tsc with erasableSyntaxOnly, which rejects parameter properties, enums and namespaces, the syntax Node's type stripping cannot load.
+2026-11-20T13:45:20Z s=ad85a3b9 DONE fp=197de4a4bb40 cov=93.5% paths=ARCH.md,CHANGELOG.md,Makefile,README.md(+49)

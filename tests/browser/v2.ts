@@ -12,9 +12,44 @@ self.onmessage = async ({ data }) => {
       : await createOPFSStorage({ name: namespace });
     const backend = createBrowserBackend(storage, namespace, navigator.locks);
     const db = await openDbsonl<number>(backend, 'browser', { create: true });
-    if (data.mode === 'directory') {
+    let reply: Record<string, unknown> = {};
+    if (data.mode === 'part') {
+      // A nested worker: its own storage, backend and handle, pinned to the head it was sent.
+      const session = await db.beginRead({ at: data.head }); const keys: string[] = [];
+      for await (const batch of session.scanBatches({ ...data.range, batchSize: 5 })) for (const row of batch) keys.push(row.key);
+      await session.close(); await db.close(); self.postMessage({ ok: true, keys }); return;
+    }
+    if (data.mode === 'split') {
+      // Three nested workers scan split() ranges of one pinned snapshot while this worker writes and compacts.
+      const session = await db.beginRead(), expected: string[] = [];
+      for await (const row of session.scan()) expected.push(row.key);
+      const ranges = await session.split(3);
+      const parts = ranges.map(range => new Promise<string[]>((resolve, reject) => {
+        const worker = new Worker(self.location.href, { type: 'module' });
+        worker.onmessage = event => { worker.terminate(); if (event.data.ok) resolve(event.data.keys); else reject(new Error(event.data.error)); };
+        worker.onerror = event => { worker.terminate(); reject(new Error(event.message)); };
+        worker.postMessage({ namespace: data.namespace, mode: 'part', head: session.head, range });
+      }));
+      for (let i = 0; i < 10; i++) await db.put(`split-${i}`, i);
+      await db.compact();
+      const union = (await Promise.all(parts)).flat();
+      if (JSON.stringify(union) !== JSON.stringify(expected)) throw new Error('Split ranges do not add up to the full scan.');
+      await session.close();
+      reply = { ranges: ranges.length, rows: union.length };
+    } else if (data.mode === 'directory') {
       await db.transaction(tx => { tx.put('a', 1); tx.put('b', 2); });
       if ((await db.verify()).count !== 2) throw new Error('Directory-handle transaction failed.');
+    } else if (data.mode === 'scan') {
+      // Shared OPFS readers in several workers, beside a writer that takes the same files alone.
+      for (let pass = 0; pass < 20; pass++) {
+        const session = await db.beginRead(); let rows = 0;
+        for await (const row of session.scan()) { rows++; if ((await session.get(row.key)).revision !== row.revision) throw new Error('Parallel read disagrees with its scan.'); }
+        if (rows !== session.count) throw new Error('Parallel scan count differs.');
+        await session.close();
+      }
+    } else if (data.mode === 'write') {
+      for (let i = 0; i < 30; i++) await db.put(`w-${i}`, i);
+      await db.compact(); await db.collect();
     } else if (data.mode !== 'verify') {
       for (let i = 0; i < 15; i++) {
         for (;;) {
@@ -34,6 +69,6 @@ self.onmessage = async ({ data }) => {
     for await (const batch of batchSession.scanBatches({ batchSize: 7 })) batchRows += batch.length;
     if (batchRows !== batchSession.count) throw new Error('Native browser batch count differs.');
     await batchSession.close();
-    await db.close(); self.postMessage({ ok: true });
+    await db.close(); self.postMessage({ ok: true, ...reply });
   } catch (error) { self.postMessage({ ok: false, error: error instanceof Error ? error.stack : String(error) }); }
 };

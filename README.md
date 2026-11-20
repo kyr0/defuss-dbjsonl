@@ -1,6 +1,6 @@
-# defuss-dbsonl 0.6.0
+# defuss-dbsonl 0.7.0
 
-Transactional key-value storage for Node.js, Bun and browser workers. Values are DSON, so dates, binary views, bigint, `undefined` and cyclic references survive storage. It is built on [defuss-dson](https://dson.defuss.org) 1.5.1 and [defuss-storage](https://storage.defuss.org) 0.3.1 and ships TypeScript declarations with ESM and CommonJS builds. It is designed as the backing store and API of [defuss-dataview](https://dataview.defuss.org), which adds filters, sorting and paging for table and tree grids. Project website: [dbsonl.defuss.org](https://dbsonl.defuss.org).
+Transactional key-value storage for Node.js, Bun and browser workers. Values are DSON, so dates, binary views, bigint, `undefined` and cyclic references survive storage. It is built on [defuss-dson](https://dson.defuss.org) 1.5.1 and [defuss-storage](https://storage.defuss.org) 0.4.1 and ships TypeScript declarations with ESM and CommonJS builds. It is designed as the backing store and API of [defuss-dataview](https://dataview.defuss.org), which adds filters, sorting and paging for table and tree grids. Project website: [dbsonl.defuss.org](https://dbsonl.defuss.org).
 
 VERIFIED: A database is a persistent copy-on-write B+tree with immutable snapshots, atomic batches, optimistic serializable transactions, compaction and process-safe coordination. Opening reads two small manifest slots instead of replaying a log, and readers never block writers.
 
@@ -51,6 +51,22 @@ try {
 The transaction callback runs once. A concurrent commit that changed a key the callback read makes it fail with `CONFLICT` instead of retrying, because a retry would repeat any side effects in your callback; after a scan, any concurrent commit does. Retry explicitly where that is safe. Concurrent batches and transactions on one handle publish together: one write and one pair of flushes for the queued group, while each keeps its own revision and receipt. `ifRevision` gives compare-and-swap for changes prepared outside a transaction.
 
 For bulk reads, a snapshot's `scanBatches()` yields the same rows as `scan()` in arrays of up to 256. It tracks one pull per batch instead of one per row, so a full scan takes less time; [API](docs/API.md) has its byte budget and options.
+
+On native storage, `scanBatches()` uses worker threads by itself once a snapshot range holds at least 5000 rows: a pool of up to four workers decodes the rows and hands them back in key order. A full scan of 100,000 documents took 105 ms instead of 401 ms under Node. `createFileBackend(root, { scanWorkers: 0 })` turns the pool off; scans with a `sizeOf` callback, `scan()` row iterators and memory and browser backends stay in the calling thread.
+
+To run your own filters and aggregates in workers, or to scan in browser workers, `split(n)` cuts a snapshot into at most `n` key ranges with exact row counts. Each worker opens its own backend and handle on the same files, pins the same snapshot with `beginRead({ at: head })` and scans one range. The first snapshot must stay open until every worker has pinned. In Node.js and Bun worker threads, open native backends with `{ io: 'sync' }`: a scanning thread can block itself, and asynchronous reads queue on the thread pool that all threads of a process share.
+
+```ts
+// Coordinator: pin, split, hand out the head and one range per worker.
+const session = await db.beginRead();
+const ranges = await session.split(4);
+// Worker, on its own createFileBackend(root, { io: 'sync' }) and openDbsonl(backend, 'accounts'):
+const view = await workerDb.beginRead({ at: head });
+for await (const batch of view.scanBatches(range)) { /* decode and filter here */ }
+await view.close();
+```
+
+With 8 worker threads that keep their rows, a full scan of 100,000 native documents took 22 ms under Node against 121 ms in one thread, with the index cached on every handle ([PERFORMANCE.md](docs/PERFORMANCE.md#parallel-scans-on-macos-arm64)).
 
 Memory storage needs no platform entry:
 

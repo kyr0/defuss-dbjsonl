@@ -12,12 +12,15 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
     "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
     "skipLibCheck": false
   },
   "include": [
     "src/**/*.ts"
   ],
   "exclude": [
-    "src/server.ts"
+    "src/server.ts",
+    "src/scan-pool.ts",
+    "src/scan-worker.ts"
   ]
 }

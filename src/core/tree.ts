@@ -1,5 +1,5 @@
 /** VERIFIED: Copy-on-write B+tree paths keep old snapshot roots immutable. */
-import type { Child, Entry, Page, Ref } from './types.js';
+import type { Child, Entry, Page, Partition, Ref } from './types.js';
 import { corrupt, key, reference, natural, DbsonlError } from './common.js';
 import type { Appender } from './io.js';
 export const FANOUT = 32;
@@ -102,7 +102,12 @@ export class BatchTree {
   /** Pages this batch appended, for the caller to cache once the root is published. */
   readonly written: { ref: Ref; page: Page }[] = [];
   /** cached returns an already validated committed page, or undefined to read it through the writer. */
-  constructor(private readonly writer: Appender, root: Ref | null, count: number, private readonly byteBudget: number, private readonly cached: (ref: Ref) => Page | undefined = () => undefined) { this.root = root; this.count = count; }
+  private readonly writer: Appender;
+  private readonly byteBudget: number;
+  private readonly cached: (ref: Ref) => Page | undefined;
+  constructor(writer: Appender, root: Ref | null, count: number, byteBudget: number, cached: (ref: Ref) => Page | undefined = () => undefined) {
+    this.writer = writer; this.byteBudget = byteBudget; this.cached = cached; this.root = root; this.count = count;
+  }
   /** Committed pages on the next edit's path, found by missing(); each becomes a dirty copy in editable(). */
   private readonly fetched = new Map<Ref, Page>();
   private editable(link: Link | null): DirtyPage {
@@ -195,11 +200,102 @@ export class BatchTree {
   }
 }
 
+/**
+ * One subtree with its exact row count, or one entry (no ref) with its key. A subtree's keys lie in (low, high]:
+ * high is its routing max, low the max of the sibling before it, undefined at the left edge of the tree.
+ */
+type Piece = { count: number; ref?: Ref; key?: string; low?: string; high?: string };
+/** The smallest key of a piece: its own, or the first one down the left edge of its subtree. */
+async function firstKey(load: LoadPage, piece: Piece): Promise<string> {
+  if (piece.key !== undefined) return piece.key;
+  let ref = piece.ref!;
+  for (let depth = 0; ; depth++) {
+    if (depth > 64) corrupt('Index depth exceeds the format safety bound.');
+    const loaded = load(ref), page = 'kind' in loaded ? loaded : await loaded;
+    if (page.kind === 'leaf') return page.entries[0]!.key;
+    ref = page.children[0]!.ref;
+  }
+}
+/** Replace a subtree by its children, or a leaf by its entries, keeping each child's key interval. */
+async function open(load: LoadPage, piece: Piece, next: Piece[]): Promise<void> {
+  const loaded = load(piece.ref!), page = 'kind' in loaded ? loaded : await loaded;
+  if (page.kind === 'leaf') { for (const entry of page.entries) next.push({ count: 1, key: entry.key }); return; }
+  let low = piece.low;
+  for (const child of page.children) { next.push({ count: child.count, ref: child.ref, ...(low !== undefined && { low }), high: child.max }); low = child.max; }
+}
+/**
+ * Cut the rows in [gte, lt) into at most parts contiguous key ranges with near-equal row counts. First the subtrees
+ * that straddle gte or lt are opened, at most two per level, until every piece lies inside or outside the range; the
+ * inside pieces' subtree counts then give the exact number of rows. Next, only subtrees above an eighth of one share
+ * are opened, so the cost is a few pages near the root. Each boundary is a real key, the first of the next range: a
+ * key one code unit past the previous range's last key could exceed the key length bound that scan options enforce.
+ */
+export async function split(load: LoadPage, root: Ref | null, total: number, parts: number, gte?: string, lt?: string): Promise<Partition[]> {
+  const whole = (count: number): Partition[] => [{ ...(gte !== undefined && { gte }), ...(lt !== undefined && { lt }), count }];
+  if (!root || (gte !== undefined && lt !== undefined && gte >= lt)) return whole(0);
+  if (gte === undefined && lt === undefined && parts === 1) return whole(total);
+  let pieces = await within(load, root, total, gte, lt);
+  const rows = pieces.reduce((sum, piece) => sum + piece.count, 0);
+  if (!rows || parts === 1) return whole(rows);
+  const limit = Math.max(1, Math.floor(rows / parts / 8));
+  for (let depth = 0; pieces.some(piece => piece.ref && piece.count > limit); depth++) {
+    if (depth > 64) corrupt('Index depth exceeds the format safety bound.');
+    const next: Piece[] = [];
+    for (const piece of pieces) if (!piece.ref || piece.count <= limit) next.push(piece); else await open(load, piece, next);
+    pieces = next;
+  }
+  const out: Partition[] = [];
+  let used = 0, count = 0, low = gte;
+  for (let i = 0; i < pieces.length; i++) {
+    count += pieces[i]!.count; used += pieces[i]!.count;
+    // Cut once the running total reaches the next of parts equal shares; one large piece can skip a share.
+    if (i + 1 < pieces.length && out.length + 1 < parts && used * parts >= rows * (out.length + 1)) {
+      const high = await firstKey(load, pieces[i + 1]!);
+      out.push(low === undefined ? { lt: high, count } : { gte: low, lt: high, count }); low = high; count = 0;
+    }
+  }
+  out.push({ ...(low !== undefined && { gte: low }), ...(lt !== undefined && { lt }), count });
+  return out;
+}
+/**
+ * The key of row index (from 0) of [gte, lt), or undefined past its last row. Subtree counts lead the way down, so
+ * it costs one page per level besides the range's two boundaries.
+ */
+export async function keyAt(load: LoadPage, root: Ref | null, total: number, index: number, gte?: string, lt?: string): Promise<string | undefined> {
+  if (!root || (gte !== undefined && lt !== undefined && gte >= lt)) return undefined;
+  let pieces = await within(load, root, total, gte, lt);
+  for (let depth = 0; ; depth++) {
+    if (depth > 64) corrupt('Index depth exceeds the format safety bound.');
+    let i = 0;
+    for (; i < pieces.length && index >= pieces[i]!.count; i++) index -= pieces[i]!.count;
+    const piece = pieces[i];
+    if (!piece) return undefined;
+    if (piece.key !== undefined) return piece.key;
+    const next: Piece[] = []; await open(load, piece, next); pieces = next;
+  }
+}
+/** The pieces that hold exactly the rows of [gte, lt), in key order; the subtrees on its two boundaries are opened. */
+async function within(load: LoadPage, root: Ref, total: number, gte?: string, lt?: string): Promise<Piece[]> {
+  const inside = (piece: Piece) => piece.key !== undefined
+    ? (gte === undefined || piece.key >= gte) && (lt === undefined || piece.key < lt)
+    : (gte === undefined || (piece.low !== undefined && piece.low >= gte)) && (lt === undefined || piece.high! < lt);
+  const outside = (piece: Piece) => piece.key !== undefined ? !inside(piece)
+    : (gte !== undefined && piece.high! < gte) || (lt !== undefined && piece.low !== undefined && piece.low >= lt);
+  let pieces: Piece[] = [{ count: total, ref: root }];
+  for (let depth = 0; pieces.some(piece => !inside(piece) && !outside(piece)); depth++) {
+    if (depth > 64) corrupt('Index depth exceeds the format safety bound.');
+    const next: Piece[] = [];
+    for (const piece of pieces) if (outside(piece)) continue; else if (inside(piece)) next.push(piece); else await open(load, piece, next);
+    pieces = next.filter(piece => !outside(piece));
+  }
+  return pieces;
+}
 /** Streaming bulk load retains at most FANOUT references per level, never all keys. */
 export class BulkTree {
   private leaf: Entry[] = [];
   private levels: Child[][] = [];
-  constructor(private readonly writer: Appender) {}
+  private readonly writer: Appender;
+  constructor(writer: Appender) { this.writer = writer; }
   private async push(child: Child, level: number): Promise<void> {
     const items = this.levels[level] ?? (this.levels[level] = []); items.push(child);
     if (items.length === FANOUT) { this.levels[level] = []; await this.push(await save(this.writer, { kind: 'branch', children: items }), level + 1); }

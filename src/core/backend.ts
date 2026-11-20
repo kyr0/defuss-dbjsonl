@@ -41,16 +41,22 @@ export function createMemoryBackend(options?: MemoryStorageOptions): Backend {
   return { storage: createMemoryStorage(options), coordinator: createMemoryCoordinator(), durability: 'memory', writeChunkBytes: Math.min(65536, options?.maxWriteBytes ?? 65536, options?.maxPendingWriteBytes ?? 65536) };
 }
 
-/** Always close the Storage handle before unlocking: OPFS handles are exclusive. */
+/**
+ * Readers share the I/O lock, writers and removals take it alone. Storage 0.4 shares read-only handles but rejects
+ * BUSY when one meets an owner or a removal, so the lock mirrors that rule and turns BUSY into waiting. Always close
+ * the Storage handle before unlocking.
+ */
 export async function withFile<T>(backend: Backend, name: string, open: OpenOptions, work: (file: StorageFile) => Promise<T>): Promise<T> {
-  return locked(backend, `io-${name}`, async () => {
+  const release = await backend.coordinator.acquire(`io-${name}`, open.readOnly === true && open.shared !== false);
+  if (!release) throw new Error('Coordinator did not grant a blocking lock.');
+  try {
     const file = await backend.storage.open(name, open);
     try { return await work(file); } finally { await file.close(); }
-  });
+  } finally { await release(); }
 }
-/** One cleanup boundary for every coordinator implementation. */
-export async function locked<T>(backend: Backend, name: string, work: () => Promise<T>, signal?: CancellationSignal): Promise<T> {
-  const release = await backend.coordinator.acquire(name, false, signal);
+/** One cleanup boundary for every coordinator implementation; shared takes the lock in shared mode. */
+export async function locked<T>(backend: Backend, name: string, work: () => Promise<T>, signal?: CancellationSignal, shared = false): Promise<T> {
+  const release = await backend.coordinator.acquire(name, shared, signal);
   if (!release) throw new Error('Coordinator did not grant a blocking lock.');
   try { abort(signal); return await work(); } finally { await release(); }
 }

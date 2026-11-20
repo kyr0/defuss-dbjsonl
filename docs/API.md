@@ -1,4 +1,4 @@
-# API (format 2)
+# API (formats 2 and 3)
 
 VERIFIED: All methods return promises unless listed as synchronous. Runtime values use DSON, including binary views, dates, bigint, undefined and cyclic references. Generic `T` describes application values; DBSONL does not perform application schema validation.
 
@@ -7,7 +7,7 @@ VERIFIED: All methods return promises unless listed as synchronous. Runtime valu
 | Export | Contract |
 | --- | --- |
 | `createMemoryBackend(options?)` | New isolated memory namespace; share the returned object between clients |
-| `createFileBackend(root, options?)` from `/server` | Native Storage plus whole-file OS locks and directory fsync, including the root's ancestors at creation |
+| `createFileBackend(root, options?)` from `/server` | Native Storage plus whole-file OS locks and directory fsync, including the root's ancestors at creation; `scanWorkers` and `scanThreshold` set the scan pool, `syncReadBytes` the largest read that blocks under asynchronous I/O (default 16384) |
 | `createBrowserBackend(storage, namespace, locks, writeChunkBytes?)` from `/browser` | Supplied Storage plus Web Locks; fourth argument defaults to 65536 |
 | `openDbsonl<T>(backend, name, options?)` | Read persistent metadata; missing database requires `create: true`, which also completes an interrupted create (empty head and generations) |
 
@@ -22,7 +22,7 @@ Names contain 1 through 64 lowercase letters, digits, hyphens or underscores, be
 | `delete(key, options?)` | Atomic delete; deleting an absent key is valid |
 | `batch(mutations, {ifRevision?, signal?}?)` | One revision for all operations; duplicate keys apply in input order |
 | `transaction(callback, {signal?}?)` | `{result, revision, count}`; callback runs once; a changed read key aborts publication |
-| `beginRead()` | Explicit immutable snapshot with `revision`, `count`, `get`, `scan`, `scanBatches`, `close` |
+| `beginRead({at?}?)` | Explicit immutable snapshot with `head`, `revision`, `count`, `get`, `scan`, `scanBatches`, `split`, `close`; `at` pins the head of a snapshot that is still open elsewhere |
 | `stats()` | Current revision, count, generation, committedBytes, cacheBytes, cachePages, durability |
 | `verify()` | Full persisted logical integrity traversal; returns revision and count |
 | `compact({mode?, signal?}?)` | Copy live data and rebuild index; returns revision, beforeBytes, afterBytes |
@@ -38,6 +38,12 @@ A transaction exposes `revision`, async `get`, synchronous `put`/`delete` and an
 Snapshot and transaction scans accept `{gte?, lt?, limit?, signal?}` and yield one `{key, value, revision}` per pull. `gte` is inclusive, `lt` exclusive. Returned values are owned decoded objects. A paused iterator becomes unusable when its snapshot closes. Use `try/finally` to close snapshots even after errors or early breaks.
 
 VERIFIED: A snapshot's `scanBatches({gte?, lt?, limit?, signal?, batchSize?, maxBatchBytes?, sizeOf?})` yields the rows `scan` yields for the same range and limit, as fresh nonempty arrays of owned decoded `{key, value, revision}` records. A batch holds at most `batchSize` rows (default 256) and `maxBatchBytes` bytes (default 4 MiB). A row counts its encoded frame length, or the safe non-negative integer that `sizeOf(row)` returns; `sizeOf` runs once per row. When the next row would exceed the byte budget, the batch ends and that row starts the next one. A row larger than the whole budget fails the pull with `LIMIT_EXCEEDED`; batches yielded before it stay valid. Each pull is admitted before `sizeOf` runs, so `close()`, even when called from inside `sizeOf`, waits for the pull before it releases the snapshot. With one tracked pull per batch instead of per row, a full scan took 0.46 to 0.84 of the 0.5.0 row scan's time ([PERFORMANCE.md](PERFORMANCE.md#batch-scans-on-macos-arm64)). Transaction scans stay row iterators.
+
+VERIFIED: On a native backend, `scanBatches` without `sizeOf` runs in the backend's worker pool when its range, or its `limit`, covers at least `scanThreshold` rows (default 5000). It yields the same rows in the same order and fails with the same codes as a scan in one thread; a batch can end early where one worker's range ends. `scanWorkers` (default up to 4, one fewer than the CPUs, on the main thread and 0 in worker threads) sets the pool size, and 0 turns it off. Closing the iterator or the snapshot returns after the workers have released their pins.
+
+VERIFIED: A snapshot's `split(parts, {gte?, lt?}?)` returns 1 to `parts` ranges `{gte?, lt?, count}` in key order, no more than the interval's row count unless it is empty. The first has the given `gte` or none, the last the given `lt` or none, and each other boundary is a key of the snapshot, the next range's `gte`, so the ranges cover every row of the interval once, and each `count` is the exact number of rows in its range. Pass a range to `scan` or `scanBatches` as their `gte` and `lt`. An empty interval returns one range with `count: 0`; `parts` below 1 throws `RangeError`. With at least 8 rows per part, each range misses its share of the rows by at most a quarter: the cut opens every subtree above an eighth of a share, so a boundary lands at most an eighth of a share away from its target.
+
+VERIFIED: `beginRead({at})` takes a snapshot's `head`, or a structured clone of it from another worker or process, and pins that root on this handle. It copies the head, checks its fields like a manifest slot, and throws `TypeError` for an invalid head or one newer than the published head. When the head's generation was collected, it rejects `CONFLICT`: begin a new read. The original snapshot, or any other pin, must stay open until this call returns, because collection removes a generation as soon as no pin holds it.
 
 VERIFIED: Optimistic compaction is the default. A concurrent publication yields `CONFLICT` and leaves an unpublished candidate for `collect()`. Exclusive compaction holds the commit lock through copying; readers retain their roots and writers queue. Compaction does not change logical revision or record revisions. Collection refreshes the fallback head before deleting files and never removes an active generation pin.
 
@@ -65,7 +71,7 @@ VERIFIED: There is no RAM map proportional to total live keys and no fixed live-
 | `QUEUE_FULL` | Per-handle admission exhausted; await existing work before retrying |
 | `LIMIT_EXCEEDED` | Staging exceeds a configured transaction budget |
 | `ABORTED` | Cancellation observed before publication started |
-| `COMMIT_UNCERTAIN` | Publication or its flush failed; inspect current revision before retrying |
+| `COMMIT_UNCERTAIN` | Publication or its flush failed, or publishing recovered format 3 commits failed; the commit may be durable, so inspect the current revision before retrying |
 | `CORRUPT` | Invalid committed bytes, schema, ordering or addresses; preserve files for diagnosis |
 | `UNSUPPORTED` | Unsupported manifest version or unavailable required platform primitive |
 | `CLOSED` | Database, snapshot or completed transaction rejects new work |
@@ -80,8 +86,8 @@ VERIFIED: `Backend` contains a Storage adapter, a positive `writeChunkBytes`, a 
 
 ## Native connection capabilities and performance
 
-VERIFIED: `createFileBackend(root, {io: 'async'})` is the default. The `{io: 'sync'}` option uses blocking reads, writes, size queries and flushes; use it in a worker or CLI when throughput matters more than scheduling other tasks on that thread. Lock attempts are always nonblocking and contended OS locks wait asynchronously. A single `get()` holds the commit lock through its read; explicit snapshots retain their independent lifetime and permit writers to proceed.
+VERIFIED: `createFileBackend(root, {io: 'async'})` is the default. The `{io: 'sync'}` option uses blocking reads, writes, size queries and flushes; use it in a worker or CLI when throughput matters more than scheduling other tasks on that thread. With asynchronous I/O, reads of at most `syncReadBytes` bytes (default 16384), such as point reads of small values and index pages, are blocking calls too, because a thread-pool round trip took longer than a read from the OS page cache; scan windows of 64 KiB stay asynchronous. Set `syncReadBytes: 0` on network or slow storage, where an uncached read can block the thread for a long time. Lock attempts are always nonblocking and contended OS locks wait asynchronously. A single `get()` holds the commit lock through its read; explicit snapshots retain their independent lifetime and permit writers to proceed.
 
-VERIFIED: Each open database retains at most two idle native read descriptors plus at most eight idle lock descriptors (normally four), an 8 KiB manifest parse cache, and its configured page cache. Each active scan or compaction can retain a 64 KiB read-ahead window, on every backend; each active writer has a buffer of at most 64 KiB. Point reads never retain decoded or encoded values between calls. If the head changes, a native get may temporarily decode both its prior-root candidate and the current-root value; this work is bounded by two record budgets, excluding decoded-object overhead. These fixed buffers and descriptor resources are separate from `stats().cacheBytes`. Close database handles when idle generations should release OS resources immediately; unlinking a file held open by another process does not immediately free its disk blocks.
+VERIFIED: Each open database retains at most two idle native read descriptors, its head and current generation files open for writing, plus at most eight idle lock descriptors (normally four), an 8 KiB manifest parse cache, and its configured page cache. Each active scan or compaction can retain a 64 KiB read-ahead window, on every backend; each active writer has a buffer of at most 64 KiB. Point reads never retain decoded or encoded values between calls. If the head changes, a native get may temporarily decode both its prior-root candidate and the current-root value; this work is bounded by two record budgets, excluding decoded-object overhead. These fixed buffers and descriptor resources are separate from `stats().cacheBytes`. Close database handles when idle generations should release OS resources immediately; unlinking a file held open by another process does not immediately free its disk blocks.
 
 VERIFIED: Custom backends may optionally expose `connect(name)`, returning `{backend, close}` for a per-database scope. The engine closes that scope on failed open and after draining successful handles. An optional `read(name, offset, length)` performs fresh positional reads of immutable committed prefixes, or the manifest under the commit lock. It must honor read chunk limits, reject invalid names/symlinks/nonregular files and return owned bytes. It fills the requested range unless EOF is encountered; partial OS reads must be retried. It must allow concurrent readers and writers of disjoint, unpublished bytes. Omitting both capabilities retains the portable Storage path. The supplied native implementation provides them; OPFS deliberately keeps its exclusive-handle protocol.

@@ -12,6 +12,14 @@ async function main() {
       if ((await db.verify()).count !== 2) throw new Error('CommonJS transaction failed.');
       await db.close();
     }
+    // The CommonJS build starts the ESM scan worker that ships beside it.
+    const backend = await createFileBackend(root, { scanWorkers: 2, scanThreshold: 100 });
+    const db = await openDbsonl<number>(backend, 'cjs-scan', { create: true });
+    await db.batch(Array.from({ length: 1000 }, (_, i) => ({ operation: 'put' as const, key: `k${String(i).padStart(4, '0')}`, value: i })));
+    const session = await db.beginRead(); let sum = 0;
+    for await (const batch of session.scanBatches()) for (const row of batch) sum += row.value;
+    await session.close(); await db.close();
+    if (sum !== 499500 || backend.parallel?.scans !== 1) throw new Error(`CommonJS worker scan failed: sum=${sum} scans=${backend.parallel?.scans}.`);
   } finally { await rm(root, { recursive: true, force: true }); }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

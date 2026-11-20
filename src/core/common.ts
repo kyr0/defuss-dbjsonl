@@ -3,8 +3,9 @@ import type { CancellationSignal } from 'defuss-storage';
 import type { Options, Ref } from './types.js';
 export type ErrorCode = 'CLOSED' | 'CORRUPT' | 'UNSUPPORTED' | 'CONFLICT' | 'ABORTED' | 'QUEUE_FULL' | 'LIMIT_EXCEEDED' | 'COMMIT_UNCERTAIN';
 export class DbsonlError extends Error {
-  constructor(readonly code: ErrorCode, message: string, options?: { cause?: unknown }) {
-    super(message, options); this.name = 'DbsonlError';
+  readonly code: ErrorCode;
+  constructor(code: ErrorCode, message: string, options?: { cause?: unknown }) {
+    super(message, options); this.code = code; this.name = 'DbsonlError';
   }
 }
 export function abort(signal?: CancellationSignal): void {
