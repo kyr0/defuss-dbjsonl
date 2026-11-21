@@ -24,7 +24,7 @@ const INDEX = Array.from({ length: 64 }, (_, i) => utf16(String(i)));
 const CRC = new Int32Array(16 * 256);
 for (let n = 0; n < 256; n++) { let crc = n; for (let i = 0; i < 8; i++) crc = crc >>> 1 ^ (crc & 1) * 0x82f63b78; CRC[n] = crc; }
 for (let n = 0; n < 256; n++) for (let k = 1; k < 16; k++) CRC[k * 256 + n] = CRC[(k - 1) * 256 + n]! >>> 8 ^ CRC[CRC[(k - 1) * 256 + n]! & 255]!;
-function checksum(b: Uint8Array, start: number, end: number): number {
+export function checksum(b: Uint8Array, start: number, end: number): number {
   let crc = -1, i = start;
   for (; i + 16 <= end; i += 16) {
     const low = crc ^ (b[i]! | b[i + 1]! << 8 | b[i + 2]! << 16 | b[i + 3]! << 24);

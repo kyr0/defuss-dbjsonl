@@ -64,8 +64,6 @@ Wrap: EVERY lead becomes a test | .vae/VERIFY.py rule | one MEMORY line with BC,
 2026-11-16T22:12:24Z s=a4ea8ca3 FINDING scripts/bench-scan.ts:record learn=none: Naming only.
 2026-11-17T00:12:30Z s=a4ea8ca3 FINDING CHANGELOG.md:0.6.0 P-precision learn=none: Wording only.
 2026-11-17T00:40:14Z s=a4ea8ca3 FINDING src/core/io.ts:readCachedValues learn=none: Simplification; behavior covered by the existing batches test.
-2026-11-20T04:16:45Z s=ad85a3b9 FAIL tests.e2e.1
-2026-11-20T05:04:32Z s=ad85a3b9 FAIL lint
 2026-11-20T05:06:19Z s=ad85a3b9 FAIL tests.e2e.1
 2026-11-20T05:09:19Z s=ad85a3b9 DONE fp=92dd8b91de0d cov=93.6% paths=ARCH.md,CHANGELOG.md,Makefile,README.md(+34)
 2026-11-20T05:09:19Z s=ad85a3b9 FINDING src/scan-pool.ts:createScanPool start() learn=test: tests/scan-workers.test.ts times out if worker messages stop arriving.
@@ -106,3 +104,5 @@ Wrap: EVERY lead becomes a test | .vae/VERIFY.py rule | one MEMORY line with BC,
 2026-11-21T00:02:09Z s=dbsonl-r FINDING src/core/page.ts:175 oxlint unicorn/no-new-array learn=none: make lint enforces it
 2026-11-21T00:09:31Z s=dbsonl-r DONE fp=25b6fb21c135 cov=93.8% paths=ARCH.md,CHANGELOG.md,Makefile,README.md(+52)
 2026-11-21T00:09:31Z s=dbsonl-r FINDING package.json, README.md:1, CHANGELOG.md, docs/FORMAT.md, docs/index.html badge, comments in src/core/store.ts, io.ts, types.ts learn=none: version wording; the gate re-verifies the tree
+2026-11-21T01:09:21Z s=dbsonl-r DONE fp=c1f23867d39e cov=93.9% paths=ARCH.md,CHANGELOG.md,Makefile,README.md(+53)
+2026-11-21T01:09:21Z s=dbsonl-r FINDING src/core/io.ts readFrames/checkedFrame/readGeneration/crc32c, src/core/page.ts checksum export, src/core/store.ts compact() copy loop, tests/compaction-copy.test.ts, ARCH.md, src/core/ARCH.md, tests/ARCH.md, CHANGELOG.md 0.8.1, package.json/README/docs/index.html version learn=test: tests/compaction-copy.test.ts pins the copy path's correctness and corruption detection

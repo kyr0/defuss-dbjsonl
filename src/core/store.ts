@@ -4,7 +4,7 @@ import type { CancellationSignal } from 'defuss-storage';
 import { withFile, locked } from './backend.js';
 import { DbsonlError, abort, key, name as validateName, options as resolveOptions, natural, corrupt } from './common.js';
 import type { Limits } from './common.js';
-import { Appender, checkHead, commitRecord, generationFile, headFile, publish, readHead, recoverTail, readValue, readCachedValue, readCachedValues, windowContains, PAGE_BYTES } from './io.js';
+import { Appender, checkHead, commitRecord, generationFile, headFile, publish, readFrames, readHead, recoverTail, readValue, readCachedValue, readCachedValues, windowContains, PAGE_BYTES } from './io.js';
 import type { HeadCache, ReadWindow } from './io.js';
 import { entries, entryPages, find, keyAt, split, toPage, BulkTree, BatchTree } from './tree.js';
 import type { Backend, Entry, Head, Page, ParallelScan, Partition, ReadOptions, Ref, Release, Options, Lookup, Row, ScanOptions, BatchScanOptions, Mutation, Commit, CommitOptions, Stats, Transaction } from './types.js';
@@ -19,6 +19,8 @@ const GROUP_MEMBERS = 64;
 const HEAD_FLUSH_BYTES = 16 * 1024 * 1024;
 /** A full page cache evicts down to this share of its limits, so one Map iterator serves many evictions. */
 const LOW_WATER = 0.9;
+/** Compaction copies values in batches of about this many frame bytes; see readFrames. */
+const COPY_BYTES = 4 * 1024 * 1024;
 /** Thrown inside a commit that found durable commits after the head; the group is checked again against them. */
 class Recovered { readonly head: Head; constructor(head: Head) { this.head = head; } }
 /** Every supported runtime (Node, Bun, browser workers) has these; the ES2022 lib does not declare them. */
@@ -709,12 +711,22 @@ export class Dbsonl<T = unknown> {
         else await locked(this.backend, `commit-${this.name}`, prepare, options.signal);
         const next = await withFile(this.backend, filename, { create: true, exclusive: true }, async file => {
           const writer = new Appender(file, 0, this.limits, this.backend.writeChunkBytes, head.dbsonl === 4); const tree = new BulkTree(writer);
-          const window: ReadWindow = {};
-          for await (const entry of entries(ref => this.load(head, ref), head.root)) {
+          // Values are copied in batches of COPY_BYTES, whose frames readFrames reads in file order.
+          let batch: Entry[] = [], bytes = 0;
+          const copy = async () => {
+            const frames = await readFrames(this.backend, this.name, head, batch.map(entry => entry.ref), this.limits.maxRecordBytes);
+            for (let i = 0; i < batch.length; i++) {
+              const ref = writer.bytes(frames[i]!);
+              await tree.add({ ...batch[i]!, ref: ref instanceof Promise ? await ref : ref });
+            }
+            batch = []; bytes = 0;
+          };
+          for await (const page of entryPages(ref => this.load(head, ref), head.root)) {
             abort(options.signal);
-            const value = await this.value(head, entry.ref, window);
-            await tree.add({ ...entry, ref: await writer.value(value) });
+            for (const entry of page) { batch.push(entry); bytes += entry.ref.byteLength; }
+            if (bytes >= COPY_BYTES) await copy();
           }
+          if (batch.length) await copy();
           const packed = await tree.finish();
           if (packed.count !== head.count) corrupt('Compaction key count disagrees with manifest.');
           await writer.flush();

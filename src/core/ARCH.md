@@ -7,7 +7,7 @@ VERIFIED: Every module has one protocol responsibility, so each failure class ha
 | `types.ts` | Structural platform contract and typed public operations |
 | `common.ts` | Shared limits, identifiers, cancellation and error categories |
 | `backend.ts` | Shared local FIFO coordination, portable handle lifetime and chunked writes |
-| `io.ts` | Two-slot publication, fresh-head parse cache, bounded framed reads/read-ahead and buffered append; one decoder boundary checks checksum, budget and exact frame length for values and index pages |
+| `io.ts` | Two-slot publication, fresh-head parse cache, bounded framed reads/read-ahead, compaction's checked frame copy in file order (`readFrames`) and buffered append; one decoder boundary checks checksum, budget and exact frame length for values and index pages |
 | `tree.ts` | Immutable B+tree lookup, path copying, bounded streaming bulk load, leaf-at-a-time traversal for batch scans and `split`, which cuts a tree into key ranges by its subtree counts |
 | `page.ts` | Index pages: format 4's compact encoding (prefix-shared keys as code units, varint numbers) and its decoder; for formats 2 and 3, DSON object frames with the same bytes as `encodeFrame` in trusted mode, about 30% faster in microbenchmarks |
 | `store.ts` | Admission, snapshots, transactions, commit groups that wait for in-flight transactions, per-key conflict checks, the second-chance page cache, verification, compaction and collection |

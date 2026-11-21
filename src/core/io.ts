@@ -1,6 +1,6 @@
 /** VERIFIED: Data is flushed before a checksummed head slot makes a root visible. */
 import { FRAME_HEADER_BYTES, decodeFrame, decodeFrames, encodeFrame, inspectFrame } from 'defuss-dson/sequence';
-import { encodeCompactPage, encodePage } from './page.js';
+import { checksum, encodeCompactPage, encodePage } from './page.js';
 import type { StorageFile } from 'defuss-storage';
 import { withFile, writeBytes } from './backend.js';
 import { DbsonlError, corrupt, reference, natural } from './common.js';
@@ -97,16 +97,7 @@ export async function publish(backend: Backend, name: string, head: Head, cache?
   if (cache?.bytes?.length === SLOT_BYTES * 2) { const next = cache.bytes.slice(); next.set(slot, offset); cache.bytes = next; cache.head = head; }
 }
 /** CRC32C (Castagnoli), the payload checksum of DSON frames; defuss-dson does not export its own. */
-const CRC_TABLE = (() => {
-  const table = new Uint32Array(256);
-  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? (c >>> 1) ^ 0x82f63b78 : c >>> 1; table[n] = c >>> 0; }
-  return table;
-})();
-export function crc32c(bytes: Uint8Array): number {
-  let c = 0xffffffff;
-  for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]!) & 0xff]! ^ (c >>> 8);
-  return (c ^ 0xffffffff) >>> 0;
-}
+export function crc32c(bytes: Uint8Array): number { return checksum(bytes, 0, bytes.length); }
 /** A commit record is small: a few numbers, a root reference and the 32-digit seal. */
 const RECORD_BYTES = 1024;
 /**
@@ -153,6 +144,55 @@ export async function recoverTail(file: StorageFile, head: Head, size: number): 
 }
 /** A small page budget and a value budget are separate because long keys are legitimate. */
 export const PAGE_BYTES = 512 * 1024;
+/** A positional read of a generation, through the backend's own read where it has one. */
+function readGeneration(backend: Backend, name: string, head: Head, offset: number, length: number): Promise<Uint8Array> {
+  const filename = generationFile(name, head.generation);
+  return backend.read ? backend.read(filename, offset, length) :
+    // Portable handles read the same bounded window, so a scan opens the file once per window, not per row.
+    withFile(backend, filename, { readOnly: true }, file => readExact(file, offset, length));
+}
+/** Compaction reads frames in runs: a gap up to this many bytes is read through instead of starting another read. */
+const COPY_GAP_BYTES = 16 * 1024;
+/** The largest run read at once. */
+const COPY_RUN_BYTES = 1024 * 1024;
+/**
+ * Compaction: the frames of `refs`, in the order given, read in offset order as runs and checked by header and payload
+ * checksum. Copying a frame's bytes instead of decoding and re-encoding its value is the reason: VERIFIED: (probe,
+ * 2026-11-21) compacting a 100,000-document store spent 31% of its time waiting for reads, 27% collecting garbage and
+ * 11% in the read call, because entries come in key order, values sit in commit order, and nearly every value missed
+ * the 64 KiB read window and allocated a new one. The payload is not decoded, so a frame whose checksum matches but
+ * whose value would not decode is copied as it is and fails where it is read, as verify() reports it.
+ */
+export async function readFrames(backend: Backend, name: string, head: Head, refs: readonly Ref[], maxRecordBytes: number): Promise<Uint8Array[]> {
+  for (const ref of refs) {
+    reference(ref, head.end);
+    if (ref.byteLength - 16 > maxRecordBytes) throw new DbsonlError('LIMIT_EXCEEDED', 'Referenced record exceeds the decoder budget.');
+  }
+  const order = refs.map((_, i) => i).sort((a, b) => refs[a]!.offset - refs[b]!.offset);
+  const runs: { offset: number; end: number; members: number[] }[] = [];
+  for (const i of order) {
+    const { offset, byteLength } = refs[i]!, run = runs[runs.length - 1];
+    if (run && offset - run.end <= COPY_GAP_BYTES && offset + byteLength - run.offset <= COPY_RUN_BYTES) { run.end = Math.max(run.end, offset + byteLength); run.members.push(i); }
+    else runs.push({ offset, end: offset + byteLength, members: [i] });
+  }
+  // One read at a time. VERIFIED: (probe, 2026-11-21) 1, 8 and 32 reads in flight compacted that store in the same
+  // 310 to 370 ms on a warm file cache.
+  const frames: Uint8Array[] = Array.from({ length: refs.length });
+  for (const run of runs) {
+    const data = await readGeneration(backend, name, head, run.offset, run.end - run.offset);
+    for (const i of run.members) frames[i] = checkedFrame(data.subarray(refs[i]!.offset - run.offset, refs[i]!.offset - run.offset + refs[i]!.byteLength), refs[i]!, maxRecordBytes);
+  }
+  return frames;
+}
+function checkedFrame(bytes: Uint8Array, ref: Ref, maxRecordBytes: number): Uint8Array {
+  if (bytes.length !== ref.byteLength) corrupt('Committed record is truncated.');
+  let frame: { byteLength: number; payloadOffset: number; payloadLength: number; checksum: number };
+  try { frame = inspectFrame(bytes, 0, { maxRecordBytes }); }
+  catch (cause) { throw new DbsonlError(cause instanceof RangeError ? 'LIMIT_EXCEEDED' : 'CORRUPT', 'DSON record header is invalid.', { cause }); }
+  if (frame.byteLength !== ref.byteLength) corrupt('Record reference length does not match its frame.');
+  if (checksum(bytes, frame.payloadOffset, frame.payloadOffset + frame.payloadLength) !== frame.checksum) corrupt('DSON record payload checksum mismatch.');
+  return bytes;
+}
 /** A scan owns one bounded window; point lookups and verify always reread values. */
 export interface ReadWindow { offset?: number; bytes?: Uint8Array }
 export async function readValue<T>(backend: Backend, name: string, head: Head, ref: Ref, maxRecordBytes: number, window?: ReadWindow): Promise<T> {
@@ -165,10 +205,7 @@ export async function readValue<T>(backend: Backend, name: string, head: Head, r
     bytes = window.bytes!.subarray(ref.offset - window.offset!, ref.offset - window.offset! + ref.byteLength);
   } else {
     const length = window && ref.byteLength <= 65536 ? Math.min(65536, head.end - ref.offset) : ref.byteLength;
-    const filename = generationFile(name, head.generation);
-    const data = backend.read ? await backend.read(filename, ref.offset, length) :
-      // Portable handles read the same bounded window, so a scan opens the file once per window, not per row.
-      await withFile(backend, filename, { readOnly: true }, file => readExact(file, ref.offset, length));
+    const data = await readGeneration(backend, name, head, ref.offset, length);
     // Prefetch stays inside the pinned committed prefix. Large records bypass it
     // so the scan cannot retain a second record-sized allocation between pulls.
     if (window) { window.offset = ref.offset; window.bytes = length <= 65536 ? data : new Uint8Array(0); }

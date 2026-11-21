@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.1
+
+VERIFIED: `compact()` copies value frames instead of decoding and re-encoding each value, and reads them in file order in batches of about 4 MiB. A 100,000-document defuss-db store with one ordered index compacted in 0.25 to 0.34 s instead of 2.9 to 3.6 s on macOS under Node.js. The file format is unchanged.
+
 ## 0.8.0
 
 VERIFIED: A full page cache evicts down to 90% of its limits in one pass over its Map, instead of asking the Map for a new iterator for every evicted page. Each new iterator walked the slots that earlier deletes had left at the front of the Map: 4.3 µs per eviction with 10,000 pages cached, against 0.2 µs with one iterator per pass. In defuss-db's benchmark store of 100,000 documents with one index, committing 64 documents took 7.0 and 7.8 ms instead of 9.3 and 9.4 ms (medians of 41 commits, two alternating runs each), and the 100,000-document bulk load 12.8 and 13.6 s instead of 13.8 and 18.4 s. Second-chance eviction is unchanged, and a pass never evicts the page it has just loaded; `tests/mvcc.test.ts` checks both limits at one page and at 40.
