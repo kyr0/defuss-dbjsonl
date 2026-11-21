@@ -1,6 +1,7 @@
 /**
- * Formats 3 and 4: one generation flush per commit, with commit records that rebuild a head whose slot never reached the
- * disk. New databases are format 4, which adds compact index pages to format 3's records.
+ * Formats 3 to 5: one generation flush per commit, with commit records that rebuild a head whose slot never reached the
+ * disk. Format 4 adds compact index pages to format 3's records; format 5, which new databases use, logs key changes
+ * between checkpoints. The recovery tests run on formats 4 and 5.
  */
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -10,7 +11,8 @@ import { decodeFrame, encodeFrame, inspectFrame } from 'defuss-dson/sequence';
 import { createMemoryBackend, openDbsonl } from '../src/index.js';
 import type { Backend } from '../src/index.js';
 import { createFileBackend } from '../src/server.js';
-import { crc32c, generationFile, headFile, readHead, SLOT_BYTES } from '../src/core/io.js';
+import { crc32c, generationFile, headFile, readHead } from '../src/core/io.js';
+import { older, restore } from './older.js';
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
@@ -22,22 +24,10 @@ async function bytes(backend: Backend, name: string): Promise<Uint8Array> {
   const file = await backend.storage.open(name, { readOnly: true });
   try { return await file.read(0, await file.size()); } finally { await file.close(); }
 }
-/** A power loss that kept the generation's flushed commits but lost later head slot writes. */
-async function restore(backend: Backend, name: string, data: Uint8Array): Promise<void> {
-  const file = await backend.storage.open(name);
-  try { await file.truncate(0); await file.write(0, data); await file.flush(); } finally { await file.close(); }
-}
-/**
- * An empty database whose head an older version wrote: format 2 without a seal, or format 3 with one. Converted before
- * any write, so every page the test writes uses that format's encoding.
- */
-async function older(backend: Backend, name: string, format: 2 | 3): Promise<void> {
-  await (await openDbsonl<number>(backend, name, { create: true })).close();
-  const head = await readHead(backend, name), { seal, ...rest } = head;
-  const slots = new Uint8Array(SLOT_BYTES * 2);
-  for (const publication of [head.publication, head.publication + 1])
-    slots.set(encodeFrame({ ...rest, dbsonl: format, publication, ...(format === 3 && { seal }) }), (publication % 2) * SLOT_BYTES);
-  await restore(backend, headFile(name), slots);
+/** A database of format 4, or a new one, which is format 5. */
+async function create<T>(backend: Backend, name: string, format: 4 | 5, options: { maxRecordBytes?: number } = {}) {
+  if (format === 4) await older(backend, name, 4);
+  return openDbsonl<T>(backend, name, { create: true, ...options });
 }
 /** The decoded frame of the root page: a DSON object in formats 2 and 3, compact bytes in format 4. */
 async function rootPage(backend: Backend, name: string): Promise<unknown> {
@@ -50,13 +40,14 @@ async function truncate(backend: Backend, name: string, size: number): Promise<v
   try { await file.truncate(size); await file.flush(); } finally { await file.close(); }
 }
 
-for (const [kind, make] of backends) {
-  test(`${kind}: new databases use format 4, and reopening adopts commits whose head slot was lost`, async () => {
+for (const [backendKind, make] of backends) for (const format of [4, 5] as const) {
+  const kind = `${backendKind} format ${format}`;
+  test(`${kind}: reopening adopts commits whose head slot was lost`, async () => {
     const backend = await make();
-    let db = await openDbsonl<unknown>(backend, 'lost', { create: true });
+    let db = await create<unknown>(backend, 'lost', format);
     await db.put('a', 1);
     const head = await readHead(backend, 'lost');
-    expect(head.dbsonl).toBe(4); expect(head.seal).toMatch(/^[0-9a-f]{32}$/);
+    expect(head.dbsonl).toBe(format); expect(head.seal).toMatch(/^[0-9a-f]{32}$/);
     const early = await bytes(backend, headFile('lost'));
     await db.put('b', 2);
     // A stored value shaped like a commit record, with a seal it cannot know, stays a value.
@@ -74,7 +65,7 @@ for (const [kind, make] of backends) {
 
   test(`${kind}: recovery checks frames by checksum, so values above the reopening handle's budget do not stop it`, async () => {
     const backend = await make();
-    let db = await openDbsonl<unknown>(backend, 'large', { create: true, maxRecordBytes: 1 << 20 });
+    let db = await create<unknown>(backend, 'large', format, { maxRecordBytes: 1 << 20 });
     await db.put('a', 1);
     const early = await bytes(backend, headFile('large'));
     await db.put('big', new Uint8Array(600_000).fill(7)); await db.put('after', 2);
@@ -91,7 +82,7 @@ for (const [kind, make] of backends) {
 
   test(`${kind}: a torn last commit ends recovery at the one before it`, async () => {
     const backend = await make();
-    let db = await openDbsonl<number>(backend, 'torn', { create: true });
+    let db = await create<number>(backend, 'torn', format);
     await db.put('a', 1);
     const early = await bytes(backend, headFile('torn'));
     await db.put('b', 2); await db.put('c', 3);
@@ -110,7 +101,7 @@ for (const [kind, make] of backends) {
 
   test(`${kind}: a writer adopts durable commits that another handle left without a head slot`, async () => {
     const backend = await make();
-    const a = await openDbsonl<number>(backend, 'crash', { create: true });
+    const a = await create<number>(backend, 'crash', format);
     const b = await openDbsonl<number>(backend, 'crash');
     await a.put('x', 1);
     const early = await bytes(backend, headFile('crash'));
@@ -122,13 +113,13 @@ for (const [kind, make] of backends) {
     expect((await b.get('y')).value).toBe(2);
     await b.compact(); await b.collect();
     expect(await b.verify()).toMatchObject({ count: 3, revision: 3 });
-    expect((await readHead(backend, 'crash')).dbsonl).toBe(4);
+    expect((await readHead(backend, 'crash')).dbsonl).toBe(format);
     await b.close();
   });
 
   test(`${kind}: a write rejected before recovery stays rejected when its group is checked again`, async () => {
     const backend = await make();
-    const a = await openDbsonl<number>(backend, 'retry', { create: true });
+    const a = await create<number>(backend, 'retry', format);
     const b = await openDbsonl<number>(backend, 'retry');
     await a.put('x', 1);
     const early = await bytes(backend, headFile('retry'));
@@ -142,6 +133,9 @@ for (const [kind, make] of backends) {
     await b.close();
   });
 
+}
+
+for (const [kind, make] of backends) {
   test(`${kind}: a format 3 database keeps format 3, its commit records and DSON object pages`, async () => {
     const backend = await make();
     await older(backend, 'three', 3);

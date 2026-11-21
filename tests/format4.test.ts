@@ -8,6 +8,7 @@ import { createMemoryBackend, openDbsonl } from '../src/index.js';
 import type { Backend, Mutation } from '../src/index.js';
 import { createFileBackend } from '../src/server.js';
 import { generationFile, headFile, readHead, SLOT_BYTES } from '../src/core/io.js';
+import { older } from './older.js';
 import { decodeCompactPage, encodeCompactPage } from '../src/core/page.js';
 import type { Page } from '../src/core/types.js';
 
@@ -36,9 +37,11 @@ async function rows(db: Awaited<ReturnType<typeof openDbsonl<number>>>): Promise
 // shared prefix, lone surrogates, and the 4096-unit maximum.
 const SPECIAL = ['', 'a', 'ab', 'é', 'éa', 'ÿ', 'Ā', '😀', '😀a', '😁', '\ud800', '\ud800x', '\udc00', 'x'.repeat(4096), 'x'.repeat(4095) + 'y'];
 
-for (const [kind, make] of backends) {
+for (const [backendKind, make] of backends) for (const format of [4, 5] as const) {
+  const kind = `${backendKind} format ${format}`;
   test(`${kind}: compact pages keep every key exact through commits, deletes, compaction and reopening`, async () => {
     const backend = await make();
+    if (format === 4) await older(backend, 'keys', 4);
     let db = await openDbsonl<number>(backend, 'keys', { create: true });
     const expected = new Map<string, number>();
     let seed = 99;
@@ -63,10 +66,11 @@ for (const [kind, make] of backends) {
     }
     const sorted = [...expected].sort(order);
     expect(await rows(db)).toEqual(sorted);
-    expect(await rootPage(backend, 'keys')).toBeInstanceOf(Uint8Array);
+    // Format 5 logs these commits, so its pages are written by the compaction below.
+    if (format === 4) expect(await rootPage(backend, 'keys')).toBeInstanceOf(Uint8Array);
     for (const key of SPECIAL) expect(await db.get(key)).toMatchObject({ found: expected.has(key) });
     await db.compact({ mode: 'exclusive' });
-    expect((await readHead(backend, 'keys')).dbsonl).toBe(4);
+    expect((await readHead(backend, 'keys')).dbsonl).toBe(format);
     expect(await rootPage(backend, 'keys')).toBeInstanceOf(Uint8Array);
     await db.close();
     db = await openDbsonl<number>(backend, 'keys');
@@ -75,8 +79,12 @@ for (const [kind, make] of backends) {
     await db.close();
   });
 
+}
+
+for (const [kind, make] of backends) {
   test(`${kind}: compact pages under a format 3 head are CORRUPT, not misread`, async () => {
     const backend = await make();
+    await older(backend, 'mixed', 4);
     const db = await openDbsonl<number>(backend, 'mixed', { create: true });
     await db.batch(Array.from({ length: 100 }, (_, n) => ({ operation: 'put' as const, key: `k${n}`, value: n })));
     await db.close();

@@ -1,11 +1,11 @@
 /** VERIFIED: Data is flushed before a checksummed head slot makes a root visible. */
 import { FRAME_HEADER_BYTES, decodeFrame, decodeFrames, encodeFrame, inspectFrame } from 'defuss-dson/sequence';
-import { checksum, encodeCompactPage, encodePage } from './page.js';
+import { checksum, decodeChanges, encodeCompactPage, encodePage } from './page.js';
 import type { StorageFile } from 'defuss-storage';
 import { withFile, writeBytes } from './backend.js';
 import { DbsonlError, corrupt, reference, natural } from './common.js';
 import type { Limits } from './common.js';
-import type { Backend, Head, Page, Ref } from './types.js';
+import type { Backend, Entry, Head, Page, Ref } from './types.js';
 
 export const SLOT_BYTES = 4096;
 export const generationFile = (name: string, generation: string) => `${name}.g-${generation}.dsq`;
@@ -37,12 +37,20 @@ function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
 /** The field checks of a decoded slot, also applied to a head a caller passes to beginRead. */
 export function checkHead(value: unknown): Head {
   const h = value as Head;
-  if (!h || (h.dbsonl !== 2 && h.dbsonl !== 3 && h.dbsonl !== 4)) throw new DbsonlError('UNSUPPORTED', 'Unsupported database manifest version.');
+  if (!h || (h.dbsonl !== 2 && h.dbsonl !== 3 && h.dbsonl !== 4 && h.dbsonl !== 5)) throw new DbsonlError('UNSUPPORTED', 'Unsupported database manifest version.');
   if (h.dbsonl >= 3 ? typeof h.seal !== 'string' || !/^[0-9a-f]{32}$/.test(h.seal) : h.seal !== undefined) corrupt('Invalid manifest seal.');
   if (!Number.isSafeInteger(h.publication) || h.publication < 1 || !Number.isSafeInteger(h.revision) || h.revision < 0 || !Number.isSafeInteger(h.count) || h.count < 0 || !Number.isSafeInteger(h.end) || h.end < 0 || typeof h.generation !== 'string' || !/^[0-9a-f]{32}$/.test(h.generation)) corrupt('Invalid manifest fields.');
   if (h.root !== null) reference(h.root, h.end);
-  if ((h.root === null) !== (h.count === 0)) corrupt('Empty root and count disagree.');
+  if (h.dbsonl === 5) {
+    if (!Number.isSafeInteger(h.log) || h.log! < 0 || h.log! > h.end || h.last === undefined) corrupt('Invalid manifest log.');
+    if (h.last !== null) { reference(h.last, h.end); if (h.last.offset < h.log!) corrupt('Invalid manifest log.'); }
+  } else if (h.log !== undefined || h.last !== undefined) corrupt('Invalid manifest fields.');
+  // Format 5: with logged changes, the written root and the count of the whole state may differ in emptiness.
+  if ((h.dbsonl !== 5 || h.last === null) && (h.root === null) !== (h.count === 0)) corrupt('Empty root and count disagree.');
   return h;
+}
+export function sameRef(a: Ref | null | undefined, b: Ref | null | undefined): boolean {
+  return a === b || (!!a && !!b && a.offset === b.offset && a.byteLength === b.byteLength);
 }
 /** A valid newer head never silently falls back merely because its data is corrupt. */
 export async function readHead(backend: Backend, name: string, cache?: HeadCache): Promise<Head> {
@@ -98,7 +106,7 @@ export async function publish(backend: Backend, name: string, head: Head, cache?
 }
 /** CRC32C (Castagnoli), the payload checksum of DSON frames; defuss-dson does not export its own. */
 export function crc32c(bytes: Uint8Array): number { return checksum(bytes, 0, bytes.length); }
-/** A commit record is small: a few numbers, a root reference and the 32-digit seal. */
+/** A commit record is small: a few numbers, up to three references and the 32-digit seal. */
 const RECORD_BYTES = 1024;
 /**
  * Formats 3 and 4: the last frame of every commit, after its values and pages. One flush of the generation makes the
@@ -107,8 +115,12 @@ const RECORD_BYTES = 1024;
  * or one whose commit is incomplete, does not chain; seal is secret to the files, so a stored value cannot pose
  * as a record.
  */
-export function commitRecord(head: Head, offset: number, prev: number): Uint8Array {
-  return encodeFrame({ dbsonl: head.dbsonl, seal: head.seal, publication: head.publication, revision: head.revision, root: head.root, count: head.count, offset, prev }, { maxRecordBytes: RECORD_BYTES - 16, trusted: true });
+export function commitRecord(head: Head, offset: number, prev: number, changes: Ref | null = null): Uint8Array {
+  // Format 5 adds the log: where it starts, the frame of this commit's key changes and the record before it in the log,
+  // so a reader walks back from head.last. A checkpoint wrote the pages instead; its log, changes and previous are null,
+  // and the log after it starts at the end of its record.
+  const record = { dbsonl: head.dbsonl, seal: head.seal, publication: head.publication, revision: head.revision, root: head.root, count: head.count, offset, prev, ...(head.dbsonl === 5 && { log: changes ? head.log : null, changes, previous: changes ? head.last : null }) };
+  return encodeFrame(record, { maxRecordBytes: RECORD_BYTES - 16, trusted: true });
 }
 /**
  * Format 3 and 4 recovery: the head on disk can be older than the last durable commit, because commits flush only the
@@ -130,10 +142,14 @@ export async function recoverTail(file: StorageFile, head: Head, size: number): 
     if (length > RECORD_BYTES) { if (crc32c(bytes.subarray(frame.payloadOffset, frame.payloadOffset + frame.payloadLength)) !== frame.checksum) break; position += length; continue; }
     let value: unknown;
     try { value = decodeFrame(bytes, 0, { maxRecordBytes: RECORD_BYTES, maxDepth: 512, maxReferences: 1_000_000 }).value; } catch { break; }
-    const record = value as Partial<Head> & { offset?: unknown; prev?: unknown };
+    const record = value as Partial<Head> & { offset?: unknown; prev?: unknown; changes?: Ref | null; previous?: Ref | null };
     if (record && typeof record === 'object' && record.dbsonl === head.dbsonl && record.seal === head.seal && record.offset === position && record.prev === prev) {
       let next: Head;
-      try { next = checkHead({ dbsonl: head.dbsonl, seal: head.seal, publication: record.publication, revision: record.revision, generation: head.generation, root: record.root, count: record.count, end: position + length }); }
+      const before = found ?? head, self = { offset: position, byteLength: length };
+      // Format 5: a logged commit keeps the written root and log of the head before it and chains to its last record;
+      // a checkpoint starts a new log at its own record.
+      if (head.dbsonl === 5 && record.changes && (!sameRef(record.root, before.root) || record.log !== before.log || !sameRef(record.previous, before.last))) break;
+      try { next = checkHead({ dbsonl: head.dbsonl, seal: head.seal, publication: record.publication, revision: record.revision, generation: head.generation, root: record.root, count: record.count, end: position + length, ...(head.dbsonl === 5 && (record.changes ? { log: before.log, last: self } : { log: position + length, last: null })) }); }
       catch { break; }
       if (next.publication <= (found ?? head).publication) break;
       found = next; prev = next.end;
@@ -144,6 +160,25 @@ export async function recoverTail(file: StorageFile, head: Head, size: number): 
 }
 /** A small page budget and a value budget are separate because long keys are legitimate. */
 export const PAGE_BYTES = 512 * 1024;
+/** Format 5: a logged commit record, checked against the head whose log it belongs to. */
+export interface LogRecord { offset: number; revision: number; count: number; changes: Ref; previous: Ref | null }
+export async function readRecord(backend: Backend, name: string, head: Head, ref: Ref): Promise<LogRecord> {
+  reference(ref, head.end);
+  if (ref.byteLength > RECORD_BYTES) corrupt('Commit record exceeds its budget.');
+  const record = decodeRef<Partial<Head> & { offset?: number; changes?: Ref | null; previous?: Ref | null }>(await readGeneration(backend, name, head, ref.offset, ref.byteLength), ref, RECORD_BYTES);
+  if (!record || typeof record !== 'object' || record.dbsonl !== 5 || record.seal !== head.seal || record.offset !== ref.offset || record.log !== head.log || !sameRef(record.root, head.root) || !record.changes) corrupt('Invalid commit record in the log.');
+  const { changes, previous = null } = record;
+  reference(changes, ref.offset);
+  if (changes.offset < head.log! || (previous && (reference(previous, ref.offset), previous.offset < head.log!))) corrupt('Commit record points outside its log.');
+  if (!Number.isSafeInteger(record.revision) || !Number.isSafeInteger(record.count) || record.count! < 0) corrupt('Invalid commit record fields.');
+  return { offset: ref.offset, revision: record.revision!, count: record.count!, changes, previous };
+}
+/** Format 5: the key changes a logged commit record points to. */
+export async function readChanges(backend: Backend, name: string, head: Head, ref: Ref, maxRecordBytes: number): Promise<Entry[]> {
+  const bytes = await readValue<unknown>(backend, name, head, ref, maxRecordBytes);
+  if (!(bytes instanceof Uint8Array)) corrupt('Invalid commit change list.');
+  return decodeChanges(bytes, bytes.length);
+}
 /** A positional read of a generation, through the backend's own read where it has one. */
 function readGeneration(backend: Backend, name: string, head: Head, offset: number, length: number): Promise<Uint8Array> {
   const filename = generationFile(name, head.generation);

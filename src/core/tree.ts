@@ -90,9 +90,11 @@ export async function* entryPages(load: LoadPage, root: Ref | null, gte?: string
     }
   }
 }
-type Link = Ref | DirtyPage;
+export type Link = Ref | DirtyPage;
 type Route = { max: string; count: number; ref: Link };
 type DirtyPage = { kind: 'leaf'; entries: Entry[] } | { kind: 'branch'; children: Route[] };
+/** Format 5: a root or child may be a page held in memory since an earlier commit or a replay; readers load it as is. */
+export function isMemoryPage(link: unknown): link is DirtyPage { return !!link && typeof link === 'object' && 'kind' in link; }
 
 /**
  * Batch-local mutable paths coalesce repeated edits before writing. Only immutable
@@ -107,23 +109,42 @@ export class BatchTree {
   get size(): number { return this.count; }
   /** Pages this batch appended, for the caller to cache once the root is published. */
   readonly written: { ref: Ref; page: Page }[] = [];
-  /** cached returns an already validated committed page, or undefined to read it through the writer. */
-  private readonly writer: Appender;
+  /** cached returns an already validated committed page, or undefined to read it through the writer or load. */
+  private readonly writer: Appender | null;
   private readonly byteBudget: number;
   private readonly cached: (ref: Ref) => Page | undefined;
-  constructor(writer: Appender, root: Ref | null, count: number, byteBudget: number, cached: (ref: Ref) => Page | undefined = () => undefined) {
-    this.writer = writer; this.byteBudget = byteBudget; this.cached = cached; this.root = root; this.count = count;
+  /** Format 5 replay has no writer: it reads committed pages through the store. */
+  private readonly load: LoadPage | undefined;
+  constructor(writer: Appender | null, root: Link | null, count: number, byteBudget: number, cached: (ref: Ref) => Page | undefined = () => undefined, load?: LoadPage) {
+    this.writer = writer; this.byteBudget = byteBudget; this.cached = cached; this.root = root; this.count = count; this.load = load;
   }
+  /**
+   * Pages this batch created or copied. A page held in memory since an earlier commit may be read by a snapshot of
+   * that commit, so this batch copies it before editing, as it copies committed pages.
+   */
+  private readonly mine = new WeakSet<object>();
+  /**
+   * Format 5: how many more pages the tree holds in memory than before this batch: copies of written pages and pages
+   * new from splits, less pages that emptied or collapsed. A copy of an in-memory page replaces it and counts nothing.
+   */
+  memoryPages = 0;
+  /** Format 5: the new root without writing its pages; a later checkpoint's finish() writes them. */
+  open(): { root: Link | null; count: number } { return { root: this.root, count: this.count }; }
   /** Committed pages on the next edit's path, found by missing(); each becomes a dirty copy in editable(). */
   private readonly fetched = new Map<Ref, Page>();
   private editable(link: Link | null): DirtyPage {
-    if (!link) return { kind: 'leaf', entries: [] };
-    if ('kind' in link) return link;
+    if (!link) { const page: DirtyPage = { kind: 'leaf', entries: [] }; this.mine.add(page); this.memoryPages++; return page; }
+    if ('kind' in link) {
+      if (this.mine.has(link)) return link;
+      const copy: DirtyPage = link.kind === 'leaf' ? { kind: 'leaf', entries: link.entries.slice() } : { kind: 'branch', children: link.children.slice() };
+      this.mine.add(copy); return copy;
+    }
     if (this.loadedBytes + link.byteLength > this.byteBudget) throw new DbsonlError('LIMIT_EXCEEDED', 'Dirty index paths exceed the transaction byte budget.');
     this.loadedBytes += link.byteLength;
     // Committed pages are immutable, so a cached copy equals a reread; editing copies its arrays.
     const page = this.fetched.get(link)!; this.fetched.delete(link);
-    return page.kind === 'leaf' ? { kind: 'leaf', entries: page.entries.slice() } : { kind: 'branch', children: page.children.slice() };
+    const copy: DirtyPage = page.kind === 'leaf' ? { kind: 'leaf', entries: page.entries.slice() } : { kind: 'branch', children: page.children.slice() };
+    this.mine.add(copy); this.memoryPages++; return copy;
   }
   /** Collect the committed pages on key's path; return the first one that needs a read, if any. */
   private missing(key: string): Ref | undefined {
@@ -144,6 +165,7 @@ export class BatchTree {
     return undefined;
   }
   private route(page: DirtyPage): Route {
+    this.mine.add(page);
     const max = page.kind === 'leaf' ? page.entries.at(-1)!.key : page.children.at(-1)!.max;
     const count = page.kind === 'leaf' ? page.entries.length : page.children.reduce((sum, item) => sum + item.count, 0);
     natural(count, 'key count'); return { max, count, ref: page };
@@ -155,7 +177,9 @@ export class BatchTree {
   apply(key: string, entry: Entry | undefined): void | Promise<void> {
     const ref = this.missing(key);
     if (!ref) { this.edit(key, entry); return; }
-    return this.writer.read<unknown>(ref).then(value => { this.fetched.set(ref, toPage(value, ref, this.writer.compact)); return this.apply(key, entry); });
+    const writer = this.writer;
+    const page = this.load ? Promise.resolve(this.load(ref)) : writer!.read<unknown>(ref).then(value => toPage(value, ref, writer!.compact));
+    return page.then(page => { this.fetched.set(ref, page); return this.apply(key, entry); });
   }
   private edit(key: string, entry: Entry | undefined): void {
     const edit = (link: Link | null, depth: number): Route[] => {
@@ -164,17 +188,19 @@ export class BatchTree {
       if (page.kind === 'leaf') {
         const at = lower(page.entries, key, item => item.key), exists = page.entries[at]?.key === key;
         if (entry) page.entries.splice(at, exists ? 1 : 0, entry); else if (exists) page.entries.splice(at, 1);
-        if (!page.entries.length) return [];
+        if (!page.entries.length) { this.memoryPages--; return []; }
         if (page.entries.length > FANOUT) {
           const right = page.entries.splice(Math.ceil(page.entries.length / 2));
+          this.memoryPages++;
           return [this.route(page), this.route({ kind: 'leaf', entries: right })];
         }
       } else {
         const at = Math.min(page.children.length - 1, lower(page.children, key, item => item.max));
         page.children.splice(at, 1, ...edit(page.children[at]!.ref, depth + 1));
-        if (!page.children.length) return [];
+        if (!page.children.length) { this.memoryPages--; return []; }
         if (page.children.length > FANOUT) {
           const right = page.children.splice(Math.ceil(page.children.length / 2));
+          this.memoryPages++;
           return [this.route(page), this.route({ kind: 'branch', children: right })];
         }
       }
@@ -182,9 +208,10 @@ export class BatchTree {
     };
     const changed = edit(this.root, 0);
     if (!changed.length) { this.root = null; this.count = 0; return; }
+    if (changed.length > 1) this.memoryPages++;
     const result = changed.length === 1 ? changed[0]! : this.route({ kind: 'branch', children: changed });
     this.root = result.ref; this.count = result.count;
-    while (this.root && 'kind' in this.root && this.root.kind === 'branch' && this.root.children.length === 1) this.root = this.root.children[0]!.ref;
+    while (this.root && 'kind' in this.root && this.root.kind === 'branch' && this.root.children.length === 1) { this.root = this.root.children[0]!.ref; this.memoryPages--; }
   }
   /** Children flush first, preserving backward-only references without an in-place page write. */
   async finish(): Promise<{ root: Ref | null; count: number }> {
@@ -197,7 +224,7 @@ export class BatchTree {
         for (const child of link.children) children.push({ ...child, ref: await persist(child.ref) });
         page = { kind: 'branch', children };
       }
-      const ref = await this.writer.value(page, true);
+      const ref = await this.writer!.value(page, true);
       // Validated before publication: a page readers would reject must fail the commit, not enter the cache.
       this.written.push({ ref, page: validatePage(page, ref) });
       return ref;

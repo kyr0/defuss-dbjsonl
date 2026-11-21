@@ -64,11 +64,7 @@ Wrap: EVERY lead becomes a test | .vae/VERIFY.py rule | one MEMORY line with BC,
 2026-11-16T22:12:24Z s=a4ea8ca3 FINDING scripts/bench-scan.ts:record learn=none: Naming only.
 2026-11-17T00:12:30Z s=a4ea8ca3 FINDING CHANGELOG.md:0.6.0 P-precision learn=none: Wording only.
 2026-11-17T00:40:14Z s=a4ea8ca3 FINDING src/core/io.ts:readCachedValues learn=none: Simplification; behavior covered by the existing batches test.
-2026-11-20T05:06:19Z s=ad85a3b9 FAIL tests.e2e.1
-2026-11-20T05:09:19Z s=ad85a3b9 DONE fp=92dd8b91de0d cov=93.6% paths=ARCH.md,CHANGELOG.md,Makefile,README.md(+34)
-2026-11-20T05:09:19Z s=ad85a3b9 FINDING src/scan-pool.ts:createScanPool start() learn=test: tests/scan-workers.test.ts times out if worker messages stop arriving.
 2026-11-20T05:09:19Z s=ad85a3b9 FINDING src/core/store.ts:ReadSession.parallel learn=none: A timing regression; correctness is covered by the limit cases in tests/scan-workers.test.ts, and speed belongs to make bench-parallel, not a timed test.
-2026-11-20T05:09:19Z s=ad85a3b9 FINDING tsconfig.browser.json exclude learn=verifier: make lint runs the browser typecheck and fails on the same mistake.
 2026-11-20T05:30:47Z s=ad85a3b9 DONE fp=81041fa405e2 cov=93.4% paths=ARCH.md,CHANGELOG.md,Makefile,README.md(+42)
 2026-11-20T05:30:47Z s=ad85a3b9 FINDING src/core/io.ts:recoverTail learn=test: tests/format3.test.ts reopens with maxRecordBytes 1024 after a 600 KB value and expects both later commits.
 2026-11-20T05:30:47Z s=ad85a3b9 FINDING src/core/store.ts:settledHead and publishGroup Recovered branch learn=test: The permission test expects COMMIT_UNCERTAIN from compaction.
@@ -106,3 +102,7 @@ Wrap: EVERY lead becomes a test | .vae/VERIFY.py rule | one MEMORY line with BC,
 2026-11-21T00:09:31Z s=dbsonl-r FINDING package.json, README.md:1, CHANGELOG.md, docs/FORMAT.md, docs/index.html badge, comments in src/core/store.ts, io.ts, types.ts learn=none: version wording; the gate re-verifies the tree
 2026-11-21T01:09:21Z s=dbsonl-r DONE fp=c1f23867d39e cov=93.9% paths=ARCH.md,CHANGELOG.md,Makefile,README.md(+53)
 2026-11-21T01:09:21Z s=dbsonl-r FINDING src/core/io.ts readFrames/checkedFrame/readGeneration/crc32c, src/core/page.ts checksum export, src/core/store.ts compact() copy loop, tests/compaction-copy.test.ts, ARCH.md, src/core/ARCH.md, tests/ARCH.md, CHANGELOG.md 0.8.1, package.json/README/docs/index.html version learn=test: tests/compaction-copy.test.ts pins the copy path's correctness and corruption detection
+2026-11-21T02:31:04Z s=9272b621 FAIL lint,tests.unit,tests.e2e.1,coverage
+2026-11-21T02:44:22Z s=dbsonl-r DONE fp=715ae8e64489 cov=94.4% paths=ARCH.md,CHANGELOG.md,Makefile,README.md(+55)
+2026-11-21T02:44:22Z s=dbsonl-r FINDING src/core/store.ts effective/memoryPages/publishGroup/session/verify/compact/create, src/core/io.ts checkHead/commitRecord/recoverTail/readRecord/readChanges/sameRef, src/core/tree.ts BatchTree (optional writer, load, mine, memoryPages, open, isMemoryPage), src/core/page.ts encodeChanges/decodeChanges, src/core/types.ts Head, tests/format5.test.ts, tests/older.ts, tests/format3|format4|mvcc|contracts tests, consumers wording, docs/FORMAT.md, docs/API.md, ARCH.md, src/core/ARCH.md, tests/ARCH.md, CHANGELOG 0.9.0, version 0.9.0 learn=test: tests/format5.test.ts pins replay, checkpoints, corruption and worker replay; .vae/MEMORY.md records the tarball overwrite
+2026-11-21T03:09:59Z s=dbsonl-r DONE fp=c26f23722d5f cov=94.4% paths=ARCH.md,CHANGELOG.md,Makefile,README.md(+55)

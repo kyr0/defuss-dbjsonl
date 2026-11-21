@@ -123,20 +123,30 @@ export function encodePage(page: object, maxRecordBytes: number): Uint8Array {
  * are little-endian base 128 of at most 8 bytes. Code units rather than UTF-8 keep every key exact, lone surrogates
  * included.
  */
-const LEAF = 1, BRANCH = 2;
+const LEAF = 1, BRANCH = 2, CHANGES = 3;
 /** FANOUT in tree.ts; validatePage checks it again, this bound only caps the allocation. */
 const MAX_ITEMS = 32, MAX_KEY_UNITS = 4096;
 let scratch = new Uint8Array(8192);
 
 export function encodeCompactPage(page: Page): Uint8Array {
-  const leaf = page.kind === 'leaf', items: (Entry | Child)[] = leaf ? page.entries : page.children;
+  return encodeItems(page.kind === 'leaf' ? LEAF : BRANCH, page.kind === 'leaf' ? page.entries : page.children);
+}
+/**
+ * Format 5: one commit's key changes, in the leaf layout with kind 3 and any count, sorted by key; a delete is an entry
+ * whose reference is { offset: 0, byteLength: 0 }, which no value frame has. VERIFIED: (prototype, 2026-11-21) the
+ * changes of a 100,000-document load written as DSON arrays of their keys made it write 50 MiB and take 2.78 s; in this
+ * encoding, 29 MiB and 2.48 s, because the sorted index keys of one commit share long prefixes.
+ */
+export function encodeChanges(entries: readonly Entry[]): Uint8Array { return encodeItems(CHANGES, entries); }
+function encodeItems(kind: number, items: readonly (Entry | Child)[]): Uint8Array {
+  const leaf = kind !== BRANCH;
   let need = 16;
   for (const item of items) need += (leaf ? (item as Entry).key : (item as Child).max).length * 2 + 40;
   if (scratch.length < need) scratch = new Uint8Array(need * 2);
   const out = scratch;
   let p = 0, previous = '';
   const varint = (value: number) => { while (value >= 128) { out[p++] = value % 128 | 128; value = Math.floor(value / 128); } out[p++] = value; };
-  out[p++] = leaf ? LEAF : BRANCH;
+  out[p++] = kind;
   varint(items.length);
   for (const item of items) {
     const text = leaf ? (item as Entry).key : (item as Child).max, limit = Math.min(previous.length, text.length);
@@ -156,6 +166,18 @@ export function encodeCompactPage(page: Page): Uint8Array {
 
 /** Structure only: validatePage checks key order, references and counts, as for object pages. */
 export function decodeCompactPage(bytes: Uint8Array): Page {
+  const { kind, items } = decodeItems(bytes, MAX_ITEMS);
+  if (kind === CHANGES) corrupt('Invalid compact index page kind.');
+  return kind === LEAF ? { kind: 'leaf', entries: items as Entry[] } : { kind: 'branch', children: items as Child[] };
+}
+/** The inverse of encodeChanges; keys must be strictly ascending. maxItems caps the allocation. */
+export function decodeChanges(bytes: Uint8Array, maxItems: number): Entry[] {
+  const { kind, items } = decodeItems(bytes, maxItems);
+  if (kind !== CHANGES) corrupt('Invalid commit change list.');
+  for (let i = 1; i < items.length; i++) if ((items[i - 1] as Entry).key >= (items[i] as Entry).key) corrupt('Commit change keys are not strictly ordered.');
+  return items as Entry[];
+}
+function decodeItems(bytes: Uint8Array, maxItems: number): { kind: number; items: (Entry | Child)[] } {
   let p = 0;
   const varint = (): number => {
     let value = 0, scale = 1;
@@ -168,10 +190,10 @@ export function decodeCompactPage(bytes: Uint8Array): Page {
     }
     return corrupt('Compact index page number out of range.');
   };
-  const kind = bytes[p++];
-  if (kind !== LEAF && kind !== BRANCH) corrupt('Invalid compact index page kind.');
+  const kind = bytes[p++]!;
+  if (kind !== LEAF && kind !== BRANCH && kind !== CHANGES) corrupt('Invalid compact index page kind.');
   const count = varint();
-  if (count < 1 || count > MAX_ITEMS) corrupt('Invalid index fanout.');
+  if (count < 1 || count > maxItems) corrupt('Invalid index fanout.');
   const items: (Entry | Child)[] = [];
   let previous = '';
   for (let i = 0; i < count; i++) {
@@ -186,8 +208,8 @@ export function decodeCompactPage(bytes: Uint8Array): Page {
     const text = shared ? previous.slice(0, shared) + suffix : suffix;
     previous = text;
     const ref = { offset: varint(), byteLength: varint() }, last = varint();
-    items.push(kind === LEAF ? { key: text, ref, revision: last } : { max: text, ref, count: last });
+    items.push(kind === BRANCH ? { max: text, ref, count: last } : { key: text, ref, revision: last });
   }
   if (p !== bytes.length) corrupt('Trailing bytes after a compact index page.');
-  return kind === LEAF ? { kind: 'leaf', entries: items as Entry[] } : { kind: 'branch', children: items as Child[] };
+  return { kind, items };
 }

@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest';
 import { createMemoryBackend, openDbsonl } from '../src/index.js';
+import { older } from './older.js';
 
 test('atomic batches publish one revision while old readers keep their roots', async () => {
   const backend = createMemoryBackend();
@@ -136,7 +137,9 @@ test('one atomic batch avoids persisting unobservable intermediate index paths',
 });
 
 test('long keys remain addressable and a dirty-page budget cannot publish a partial update', async () => {
-  const backend = createMemoryBackend(); const db = await openDbsonl<number>(backend, 'longkeys', { create: true });
+  // Format 4, which writes the pages of every commit; format 5 logs the first batch, so the put reads no page.
+  const backend = createMemoryBackend(); await older(backend, 'longkeys', 4);
+  const db = await openDbsonl<number>(backend, 'longkeys', { create: true });
   const prefix = 'Ω'.repeat(4000);
   await db.batch(Array.from({ length: 80 }, (_, i) => ({ operation: 'put', key: `${prefix}${String(i).padStart(3, '0')}`, value: i })));
   expect((await db.get(`${prefix}079`)).value).toBe(79);

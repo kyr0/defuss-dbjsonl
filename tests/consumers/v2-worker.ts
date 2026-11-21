@@ -11,7 +11,7 @@ if (mode === 'refuse') {
   // An older build must refuse a database in the current format (4) instead of reading or writing it.
   let refused = false;
   try { await openDbsonl<number>(await createFileBackend(root!), 'modern'); } catch (error) { refused = (error as { code?: string }).code === 'UNSUPPORTED'; }
-  if (!refused) throw new Error('The older build did not refuse a format 4 database.');
+  if (!refused) throw new Error('The older build did not refuse a format 5 database.');
   console.log('refused'); process.exit(0);
 }
 const db = await openDbsonl<number>(await createFileBackend(root!), 'multi');

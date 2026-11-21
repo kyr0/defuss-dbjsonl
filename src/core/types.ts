@@ -71,13 +71,21 @@ export interface Child { max: string; ref: Ref; count: number }
 export type Page = { kind: 'leaf'; entries: Entry[] } | { kind: 'branch'; children: Child[] };
 /**
  * Format 2 flushes the head on every commit. Format 3 seals each commit with a record in the generation. Format 4 adds
- * compact index pages to format 3; see FORMAT.md.
+ * compact index pages to format 3. Format 5 writes index pages only at checkpoints and logs each commit's key
+ * changes in between; see FORMAT.md.
  */
 export interface Head {
-  dbsonl: 2 | 3 | 4; publication: number; revision: number; generation: string;
-  root: Ref | null; count: number; end: number;
-  /** Formats 3 and 4: the generation's random seal, which a commit record must repeat. */
+  dbsonl: 2 | 3 | 4 | 5; publication: number; revision: number; generation: string;
+  /** The root of the written index; in format 5 the changes of the records after log apply on top of it. */
+  root: Ref | null;
+  /** Keys after every commit up to revision, logged changes included. */
+  count: number; end: number;
+  /** Formats 3 to 5: the generation's random seal, which a commit record must repeat. */
   seal?: string;
+  /** Format 5: the first offset of the log: commit records from here on log changes that root does not contain. */
+  log?: number;
+  /** Format 5: the last of those records, or null when root contains every commit. */
+  last?: Ref | null;
 }
 export type Mutation<T> = { operation: 'put'; key: string; value: T } | { operation: 'delete'; key: string };
 export type Lookup<T> = { found: false; value?: never; revision?: never } | { found: true; value: T; revision: number };

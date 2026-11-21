@@ -4,9 +4,12 @@ import type { CancellationSignal } from 'defuss-storage';
 import { withFile, locked } from './backend.js';
 import { DbsonlError, abort, key, name as validateName, options as resolveOptions, natural, corrupt } from './common.js';
 import type { Limits } from './common.js';
-import { Appender, checkHead, commitRecord, generationFile, headFile, publish, readFrames, readHead, recoverTail, readValue, readCachedValue, readCachedValues, windowContains, PAGE_BYTES } from './io.js';
+import { Appender, checkHead, commitRecord, generationFile, headFile, publish, readChanges, readFrames, readHead, readRecord, recoverTail, readValue, readCachedValue, readCachedValues, sameRef, windowContains, PAGE_BYTES } from './io.js';
+import type { LogRecord } from './io.js';
 import type { HeadCache, ReadWindow } from './io.js';
-import { entries, entryPages, find, keyAt, split, toPage, BulkTree, BatchTree } from './tree.js';
+import { entries, entryPages, find, isMemoryPage, keyAt, split, toPage, BulkTree, BatchTree } from './tree.js';
+import type { Link } from './tree.js';
+import { encodeChanges } from './page.js';
 import type { Backend, Entry, Head, Page, ParallelScan, Partition, ReadOptions, Ref, Release, Options, Lookup, Row, ScanOptions, BatchScanOptions, Mutation, Commit, CommitOptions, Stats, Transaction } from './types.js';
 
 type Encoded = { key: string; bytes: Uint8Array | undefined };
@@ -19,6 +22,11 @@ const GROUP_MEMBERS = 64;
 const HEAD_FLUSH_BYTES = 16 * 1024 * 1024;
 /** A full page cache evicts down to this share of its limits, so one Map iterator serves many evictions. */
 const LOW_WATER = 0.9;
+/**
+ * Format 5: a commit writes its index pages, a checkpoint, once its log since the last one reaches this many bytes;
+ * readers replay at most about this much. See FORMAT.md.
+ */
+const CHECKPOINT_BYTES = 16 * 1024 * 1024;
 /** Compaction copies values in batches of about this many frame bytes; see readFrames. */
 const COPY_BYTES = 4 * 1024 * 1024;
 /** Thrown inside a commit that found durable commits after the head; the group is checked again against them. */
@@ -63,9 +71,11 @@ export class ReadSession<T = unknown> {
   readonly head: Readonly<Head>;
   private readonly db: SessionSource<T>;
   private readonly release: Release;
+  /** The root of the whole state: head.root, or in format 5 the root with the logged changes applied in memory. */
+  private readonly root: Ref | null;
   /** @internal Sessions are created only by the database factory. */
-  constructor(db: SessionSource<T>, head: Readonly<Head>, release: Release) {
-    this.db = db; this.head = head; this.release = release;
+  constructor(db: SessionSource<T>, head: Readonly<Head>, release: Release, root: Link | null = head.root) {
+    this.db = db; this.head = head; this.release = release; this.root = root as Ref | null;
     if (head.root) Object.freeze(head.root);
     this.revision = head.revision; this.count = head.count;
   }
@@ -80,7 +90,7 @@ export class ReadSession<T = unknown> {
   get(id: string): Promise<Lookup<T>> {
     key(id);
     return this.work(async () => {
-      const entry = await find(ref => this.db.load(this.head, ref), this.head.root, id);
+      const entry = await find(ref => this.db.load(this.head, ref), this.root, id);
       return entry ? { found: true, value: await this.db.value(this.head, entry.ref), revision: entry.revision } : { found: false };
     });
   }
@@ -88,12 +98,12 @@ export class ReadSession<T = unknown> {
   scan(options: ScanOptions = {}): AsyncIterableIterator<Row<T>> {
     if (options.gte !== undefined) key(options.gte); if (options.lt !== undefined) key(options.lt);
     const limit = natural(options.limit ?? Number.MAX_SAFE_INTEGER, 'scan limit');
-    const { db, head } = this;
+    const { db, head, root } = this;
     async function* rows() {
       let count = 0;
       const window: ReadWindow = {};
       if (!limit) return;
-      for await (const entry of entries(ref => db.load(head, ref), head.root, options.gte, options.lt)) {
+      for await (const entry of entries(ref => db.load(head, ref), root, options.gte, options.lt)) {
         abort(options.signal);
         yield { key: entry.key, revision: entry.revision, value: await db.value(head, entry.ref, window) };
         if (++count >= limit) break;
@@ -116,7 +126,7 @@ export class ReadSession<T = unknown> {
     const batchSize = natural(options.batchSize ?? 256, 'batchSize', 1);
     const maxBytes = natural(options.maxBatchBytes ?? 4 * 1024 * 1024, 'maxBatchBytes', 1);
     if (sizeOf !== undefined && typeof sizeOf !== 'function') throw new TypeError('sizeOf must be a function.');
-    const { db, head, scans } = this, plan = (gte: string | undefined, lt: string | undefined, limit: number, batchSize: number, maxBatchBytes: number) => this.parallel(gte, lt, limit, batchSize, maxBatchBytes);
+    const { db, head, root, scans } = this, plan = (gte: string | undefined, lt: string | undefined, limit: number, batchSize: number, maxBatchBytes: number) => this.parallel(gte, lt, limit, batchSize, maxBatchBytes);
     async function* batches() {
       let count = 0, bytes = 0, batch: Row<T>[] = [];
       const window: ReadWindow = {};
@@ -136,7 +146,7 @@ export class ReadSession<T = unknown> {
         } finally { scans.delete(parallel); await parallel.close(); }
         return;
       }
-      for await (const page of entryPages(ref => db.load(head, ref), head.root, gte, lt)) {
+      for await (const page of entryPages(ref => db.load(head, ref), root, gte, lt)) {
         // page[first, last) was decoded in one call; run is empty when that call failed and the rows read one by one.
         let first = 0, last = 0, run: T[] = [];
         for (let i = 0; i < page.length; i++) {
@@ -174,19 +184,19 @@ export class ReadSession<T = unknown> {
   }
   /** Ranges and a running worker scan for a large scanBatches call, or undefined to scan in this thread. */
   private async parallel(gte: string | undefined, lt: string | undefined, limit: number, batchSize: number, maxBatchBytes: number): Promise<ParallelScan<T> | undefined> {
-    const parallel = this.db.parallel, { head } = this;
+    const parallel = this.db.parallel, { head, root } = this;
     if (!parallel?.workers || head.count < parallel.threshold || limit < parallel.threshold || (gte !== undefined && lt !== undefined && gte >= lt)) return undefined;
     const load = (ref: Ref) => this.db.load(head, ref);
     // The exact row count of [gte, lt) costs the pages on its two boundaries; no scan of the range is needed.
-    const [counted] = await split(load, head.root, head.count, 1, gte, lt);
+    const [counted] = await split(load, root, head.count, 1, gte, lt);
     const rows = Math.min(counted!.count, limit);
     if (rows < parallel.threshold) return undefined;
     // Under a limit, only the rows it takes are cut into tasks, and the key after the last of them ends the last
     // range. Cutting the whole interval as finely took 26 ms for a limit of 5000 among 300,000 rows; see ARCH.md.
-    const end = rows < counted!.count ? await keyAt(load, head.root, head.count, rows, gte, lt) : lt;
+    const end = rows < counted!.count ? await keyAt(load, root, head.count, rows, gte, lt) : lt;
     // Tasks of about 1 MiB of the generation each, judged by its average bytes per row, and two per worker at least.
     const parts = Math.min(MAX_TASKS, Math.max(parallel.workers * 2, Math.ceil(rows * (head.end / head.count) / TASK_BYTES)));
-    const ranges = (await split(load, head.root, head.count, parts, gte, end)).map(range => ({ ...(range.gte !== undefined && { gte: range.gte }), ...(range.lt !== undefined && { lt: range.lt }) }));
+    const ranges = (await split(load, root, head.count, parts, gte, end)).map(range => ({ ...(range.gte !== undefined && { gte: range.gte }), ...(range.lt !== undefined && { lt: range.lt }) }));
     return ranges.length < 2 ? undefined : parallel.scan(head, ranges, batchSize, maxBatchBytes);
   }
   /**
@@ -197,7 +207,7 @@ export class ReadSession<T = unknown> {
   split(parts: number, range: { gte?: string; lt?: string } = {}): Promise<Partition[]> {
     natural(parts, 'parts', 1);
     if (range.gte !== undefined) key(range.gte); if (range.lt !== undefined) key(range.lt);
-    return this.work(() => split(ref => this.db.load(this.head, ref), this.head.root, this.head.count, parts, range.gte, range.lt));
+    return this.work(() => split(ref => this.db.load(this.head, ref), this.root, this.head.count, parts, range.gte, range.lt));
   }
   /** Drain admitted reads before releasing the generation pin used by garbage collection. */
   close(): Promise<void> {
@@ -243,6 +253,11 @@ export class Dbsonl<T = unknown> {
   readonly backend: Backend;
   readonly name: string;
   private readonly closeBackend: Release | undefined;
+  /**
+   * Format 5: the last head this handle resolved, its root with the logged changes applied, and how many pages of that
+   * tree are held in memory; see effective().
+   */
+  private view: { head: Head; root: Link | null; pages: number } | undefined;
   constructor(backend: Backend, name: string, options: Options, closeBackend?: Release) {
     this.backend = backend; this.name = name; this.closeBackend = closeBackend;
     this.limits = resolveOptions(options);
@@ -257,8 +272,49 @@ export class Dbsonl<T = unknown> {
     void promise.then(() => this.pending.delete(promise), () => this.pending.delete(promise));
     return promise;
   }
+  /**
+   * Format 5: the root of head's whole state: the written root with the changes of the records after head.log applied
+   * in memory. Callers hold the commit lock or a pin of head's generation. The last result is kept, so a newer head of
+   * the same log replays only the records after it, and the writer's own commits replay nothing.
+   */
+  private async effective(head: Readonly<Head>): Promise<Link | null> {
+    if (head.dbsonl !== 5 || !head.last) return head.root;
+    const known = this.view;
+    if (known && known.head.generation === head.generation && known.head.publication === head.publication) return known.root;
+    const base = known && known.head.generation === head.generation && known.head.log === head.log && sameRef(known.head.root, head.root) && known.head.end <= head.end ? known : undefined;
+    const stop = base?.head.last?.offset, records: LogRecord[] = [];
+    let reached = false;
+    for (let ref: Ref | null = head.last; ref; ) {
+      if (ref.offset === stop) { reached = true; break; }
+      const record = await readRecord(this.backend, this.name, head, ref);
+      records.push(record); ref = record.previous;
+    }
+    // Without the base's last record on the way, the base is not an earlier state of this log: replay all of it.
+    const incremental = !!base && (stop === undefined || reached);
+    const tree = new BatchTree(null, incremental ? base!.root : head.root, head.count, Number.MAX_SAFE_INTEGER, ref => this.cached(pageId(head, ref)), ref => this.load(head, ref));
+    let revision = incremental ? base!.head.revision : 0;
+    for (let i = records.length - 1; i >= 0; i--) {
+      const record = records[i]!;
+      if (record.revision <= revision) corrupt('Logged commit revisions are not increasing.');
+      for (const change of await readChanges(this.backend, this.name, head, record.changes, Math.max(PAGE_BYTES, this.limits.maxTransactionBytes))) {
+        if (change.revision > record.revision) corrupt('Logged change revision exceeds its commit.');
+        const applying = tree.apply(change.key, change.ref.byteLength ? change : undefined); if (applying) await applying;
+      }
+      revision = record.revision;
+    }
+    const { root, count } = tree.open();
+    if (revision !== head.revision || count !== head.count) corrupt('Logged commits disagree with the manifest.');
+    this.view = { head, root, pages: (incremental ? base!.pages : 0) + tree.memoryPages };
+    return root;
+  }
+  /** Format 5: the pages head's tree holds in memory, once effective() resolved it. */
+  private memoryPages(head: Readonly<Head>): number {
+    const view = this.view;
+    return view && view.head.generation === head.generation && view.head.publication === head.publication ? view.pages : 0;
+  }
   /** Internal cache returns immutable implementation-owned pages, never application values. */
   private load(head: Readonly<Head>, ref: Ref): Page | Promise<Page> {
+    if (isMemoryPage(ref)) return ref as unknown as Page;
     const id = pageId(head, ref);
     return this.cached(id) ?? this.loadUncached(head, ref, id);
   }
@@ -273,7 +329,7 @@ export class Dbsonl<T = unknown> {
   }
   /** The cold path alone allocates an asynchronous load operation. */
   private async loadUncached(head: Readonly<Head>, ref: Ref, id: string): Promise<Page> {
-    return this.remember(id, toPage(await readValue(this.backend, this.name, head, ref, PAGE_BYTES), ref, head.dbsonl === 4), ref.byteLength);
+    return this.remember(id, toPage(await readValue(this.backend, this.name, head, ref, PAGE_BYTES), ref, head.dbsonl >= 4), ref.byteLength);
   }
   private remember(id: string, page: Page, bytes: number): Page {
     if (bytes > this.limits.maxCacheBytes || !this.limits.maxCachePages) return page;
@@ -305,7 +361,7 @@ export class Dbsonl<T = unknown> {
     if (this.lockedHead) {
       const head = this.lockedHead;
       const pinning = this.pin(head); this.pinning.add(pinning);
-      try { return this.session(head, await pinning); } finally { this.pinning.delete(pinning); }
+      try { return await this.session(head, await pinning); } finally { this.pinning.delete(pinning); }
     }
     return locked(this.backend, `commit-${this.name}`, async () => {
       const head = await readHead(this.backend, this.name, this.headCache);
@@ -317,8 +373,11 @@ export class Dbsonl<T = unknown> {
     if (!release) throw new Error('Coordinator did not grant generation pin.');
     return release;
   }
-  private session(head: Head, release: Release): ReadSession<T> {
-    const session = new ReadSession<T>({ load: (head, ref) => this.load(head, ref), value: (head, ref, window) => this.value(head, ref, window), cachedValue: (head, ref, window) => readCachedValue<T>(head, ref, this.limits.maxRecordBytes, window), cachedValues: (entries, start, end, window) => readCachedValues<T>(entries, start, end, this.limits.maxRecordBytes, window), forget: session => { this.sessions.delete(session); }, parallel: this.scanner }, Object.freeze(head), release);
+  /** The pin protects the replay of a format 5 log as well as the session's reads. */
+  private async session(head: Head, release: Release): Promise<ReadSession<T>> {
+    let root: Link | null;
+    try { root = await this.effective(head); } catch (error) { await release(); throw error; }
+    const session = new ReadSession<T>({ load: (head, ref) => this.load(head, ref), value: (head, ref, window) => this.value(head, ref, window), cachedValue: (head, ref, window) => readCachedValue<T>(head, ref, this.limits.maxRecordBytes, window), cachedValues: (entries, start, end, window) => readCachedValues<T>(entries, start, end, this.limits.maxRecordBytes, window), forget: session => { this.sessions.delete(session); }, parallel: this.scanner }, Object.freeze(head), release, root);
     this.sessions.add(session); return session;
   }
   /**
@@ -331,7 +390,8 @@ export class Dbsonl<T = unknown> {
     try {
       const at = options.at, root = at.root && { offset: at.root.offset, byteLength: at.root.byteLength };
       // A private copy: the caller's object, or a structured clone of it, cannot change the pinned root later.
-      head = checkHead({ dbsonl: at.dbsonl, publication: at.publication, revision: at.revision, generation: at.generation, root, count: at.count, end: at.end, ...(at.seal !== undefined && { seal: at.seal }) });
+      const last = at.last && { offset: at.last.offset, byteLength: at.last.byteLength };
+      head = checkHead({ dbsonl: at.dbsonl, publication: at.publication, revision: at.revision, generation: at.generation, root, count: at.count, end: at.end, ...(at.seal !== undefined && { seal: at.seal }), ...(at.log !== undefined && { log: at.log }), ...(at.last !== undefined && { last }) });
     } catch (cause) { throw new TypeError('options.at must be the head of a snapshot of this database.', { cause }); }
     // Shared: publication and collection take this lock alone, so they stay excluded, but workers pinning one head at
     // once do not queue behind each other; on native storage each waiter would retry every 5 ms.
@@ -352,7 +412,7 @@ export class Dbsonl<T = unknown> {
   }
   /** Internal lookup only: callers must hold a commit lock or generation pin. */
   private async lookup(head: Head, id: string): Promise<Lookup<T>> {
-    const entry = await find(ref => this.load(head, ref), head.root, id);
+    const entry = await find(ref => this.load(head, ref), await this.effective(head) as Ref | null, id);
     return entry ? { found: true, value: await this.value(head, entry.ref), revision: entry.revision } : { found: false };
   }
   get(id: string): Promise<Lookup<T>> {
@@ -483,6 +543,8 @@ export class Dbsonl<T = unknown> {
         accepted.push({ member, revision });
       }
       if (revision === head.revision) { for (const { member } of accepted) member.resolve({ revision, count: head.count }); return; }
+      // Format 5: the whole state this group builds on, replayed before the generation is opened for writing.
+      const base = await this.effective(head);
       const next = await withFile(this.backend, generationFile(this.name, head.generation), {}, async file => {
         const size = await file.size();
         if (size < head.end) corrupt('Committed generation is truncated.');
@@ -493,11 +555,12 @@ export class Dbsonl<T = unknown> {
           // An interrupted, unpublished transaction owns only bytes after this boundary.
           await file.truncate(head.end);
         }
-        const writer = new Appender(file, head.end, this.limits, this.backend.writeChunkBytes, head.dbsonl === 4);
+        const writer = new Appender(file, head.end, this.limits, this.backend.writeChunkBytes, head.dbsonl >= 4);
         // A group holds no more operations than one batch may, so one batch's page budget applies; a group
         // that still exceeds it falls back to single commits below.
-        const tree = new BatchTree(writer, head.root, head.count, this.limits.maxTransactionBytes, ref => this.cached(pageId(head, ref)));
-        const counts: number[] = [];
+        const tree = new BatchTree(writer, base, head.count, this.limits.maxTransactionBytes, ref => this.cached(pageId(head, ref)));
+        // Format 5: each key's last change in this group, for the commit's change list.
+        const counts: number[] = [], changes = new Map<string, Entry>();
         for (const { member, revision } of accepted) {
           for (const operation of member.input) {
             abort(member.signal);
@@ -505,19 +568,40 @@ export class Dbsonl<T = unknown> {
             // Both calls finish synchronously unless they need I/O; awaiting every write cost a microtask each.
             if (operation.bytes) { const ref = writer.bytes(operation.bytes); entry = { key: operation.key, ref: ref instanceof Promise ? await ref : ref, revision }; }
             const applying = tree.apply(operation.key, entry); if (applying) await applying;
+            if (head.dbsonl === 5) changes.set(operation.key, entry ?? { key: operation.key, ref: { offset: 0, byteLength: 0 }, revision });
           }
           counts.push(tree.size);
         }
+        const publication = natural(head.publication + 1, 'publication');
+        // The pages a logged commit leaves in memory count against the page cache's budget, so a log of many scattered
+        // changes cannot grow memory without bound: at either limit the commit writes its pages instead, a checkpoint.
+        const pages = this.memoryPages(head) + tree.memoryPages;
+        if (head.dbsonl === 5 && writer.end - head.log! < CHECKPOINT_BYTES && pages <= this.limits.maxCachePages) {
+          // Format 5: log the key changes instead of writing the pages they touch. VERIFIED: (prototype, 2026-11-21) a
+          // 100,000-document load with one ordered index took 2.48 s instead of 3.35 to 3.92 s and wrote 29 MiB instead
+          // of 107 MiB; a 64-document commit took 4.27 ms instead of 5.89 to 6.08 ms. See FORMAT.md.
+          const { root, count } = tree.open();
+          const sorted = [...changes.values()].sort((a, b) => (a.key < b.key ? -1 : 1));
+          const list = await writer.bytes(encodeFrame(encodeChanges(sorted), { maxRecordBytes: Math.max(PAGE_BYTES, this.limits.maxTransactionBytes), trusted: true }));
+          const published: Head = { ...head, publication, revision, count, end: writer.end }, offset = writer.end;
+          const record = writer.bytes(commitRecord(published, offset, head.end, list)); if (record instanceof Promise) await record;
+          published.end = writer.end; published.last = { offset, byteLength: writer.end - offset };
+          await writer.flush();
+          await file.flush();
+          return { head: published, written: tree.written, counts, root, pages };
+        }
         const { root, count } = await tree.finish();
-        const published: Head = { ...head, publication: natural(head.publication + 1, 'publication'), revision, root, count, end: writer.end };
+        const published: Head = { ...head, publication, revision, root, count, end: writer.end };
         if (head.dbsonl >= 3) {
           // The record goes last, so a flush that reaches the device out of order cannot seal a commit whose frames are missing.
           const ref = writer.bytes(commitRecord(published, writer.end, head.end)); if (ref instanceof Promise) await ref;
           published.end = writer.end;
+          // Format 5: a commit that writes its pages is a checkpoint; a new, empty log starts after its record.
+          if (head.dbsonl === 5) { published.log = writer.end; published.last = null; }
         }
         await writer.flush();
         await file.flush();
-        return { head: published, written: tree.written, counts };
+        return { head: published, written: tree.written, counts, root: published.root as Link | null, pages: 0 };
       });
       // Cancellation is no longer observed once publication starts: a successful commit gets a receipt.
       publishing = true;
@@ -527,6 +611,7 @@ export class Dbsonl<T = unknown> {
       try { await publish(this.backend, this.name, next.head, this.headCache, flush); if (flush) this.headFlushed = next.head.end; }
       catch (cause) { this.lockedHead = undefined; throw new DbsonlError('COMMIT_UNCERTAIN', 'Head publication failed; read the current revision before retrying.', { cause }); }
       this.lockedHead = next.head;
+      if (next.head.dbsonl === 5) this.view = { head: next.head, root: next.root, pages: next.pages };
       // Only published pages enter the cache: an unpublished tail is truncated and its addresses reused.
       for (const { ref, page } of next.written) this.remember(pageId(next.head, ref), page, ref.byteLength);
       accepted.forEach(({ member, revision }, index) => member.resolve({ revision, count: next.counts[index]! }));
@@ -565,7 +650,7 @@ export class Dbsonl<T = unknown> {
   private async validate(head: Head, reads: ReadSet, written: Set<string>): Promise<void> {
     if (reads.whole) throw new DbsonlError('CONFLICT', 'Database changed since the transaction snapshot.');
     for (const [id, seen] of reads.keys) {
-      const entry = written.has(id) ? undefined : await find(ref => this.load(head, ref), head.root, id);
+      const entry = written.has(id) ? undefined : await find(ref => this.load(head, ref), await this.effective(head) as Ref | null, id);
       if (written.has(id) || (entry?.revision ?? 0) !== seen) throw new DbsonlError('CONFLICT', 'A key the transaction read changed after its snapshot.');
     }
   }
@@ -662,6 +747,8 @@ export class Dbsonl<T = unknown> {
   /** Full logical integrity walk, separate from the O(1) open path. */
   verify(): Promise<{ revision: number; count: number }> {
     return this.run(async () => {
+      // Cache and log replay are expendable: verification rereads persisted bytes and replays the whole log.
+      this.cache.clear(); this.cacheBytes = 0; this.view = undefined;
       const session = await this.snapshot(); let count = 0;
       try {
         async function audit(db: Dbsonl<T>, ref: Ref, depth: number): Promise<{ min: string; max: string; count: number }> {
@@ -680,9 +767,8 @@ export class Dbsonl<T = unknown> {
           }
           return { min: minimum, max: page.children.at(-1)!.max, count: total };
         }
-        // Cache is expendable. Verification rereads persisted bytes, even after a prior lookup.
-        this.cache.clear(); this.cacheBytes = 0;
-        if (session.head.root) count = (await audit(this, session.head.root, 0)).count;
+        const root = await this.effective(session.head) as Ref | null;
+        if (root) count = (await audit(this, root, 0)).count;
         if (count !== session.count) corrupt('Root key count disagrees with manifest.');
         return { revision: session.revision, count };
       } finally { await session.close(); }
@@ -709,8 +795,10 @@ export class Dbsonl<T = unknown> {
       try {
         if (options.mode === 'exclusive') { outerRelease = await this.backend.coordinator.acquire(`commit-${this.name}`, false, options.signal); await prepare(); }
         else await locked(this.backend, `commit-${this.name}`, prepare, options.signal);
+        // Format 5: the copy writes the whole state, the logged changes included, and starts the new generation's log empty.
+        const root = await this.effective(head) as Ref | null;
         const next = await withFile(this.backend, filename, { create: true, exclusive: true }, async file => {
-          const writer = new Appender(file, 0, this.limits, this.backend.writeChunkBytes, head.dbsonl === 4); const tree = new BulkTree(writer);
+          const writer = new Appender(file, 0, this.limits, this.backend.writeChunkBytes, head.dbsonl >= 4); const tree = new BulkTree(writer);
           // Values are copied in batches of COPY_BYTES, whose frames readFrames reads in file order.
           let batch: Entry[] = [], bytes = 0;
           const copy = async () => {
@@ -721,7 +809,7 @@ export class Dbsonl<T = unknown> {
             }
             batch = []; bytes = 0;
           };
-          for await (const page of entryPages(ref => this.load(head, ref), head.root)) {
+          for await (const page of entryPages(ref => this.load(head, ref), root)) {
             abort(options.signal);
             for (const entry of page) { batch.push(entry); bytes += entry.ref.byteLength; }
             if (bytes >= COPY_BYTES) await copy();
@@ -732,7 +820,7 @@ export class Dbsonl<T = unknown> {
           await writer.flush();
           await file.flush();
           // A new generation gets a new seal: no record copied from the old one can chain in the new file.
-          return { ...head, ...packed, generation, end: writer.end, publication: natural(head.publication + 1, 'publication'), ...(head.dbsonl >= 3 && { seal: newGeneration() }) };
+          return { ...head, ...packed, generation, end: writer.end, publication: natural(head.publication + 1, 'publication'), ...(head.dbsonl >= 3 && { seal: newGeneration() }), ...(head.dbsonl === 5 && { log: writer.end, last: null }) };
         });
         await this.backend.coordinator.syncDirectory();
         const install = async () => {
@@ -815,9 +903,10 @@ export async function openDbsonl<T = unknown>(backend: Backend, name: string, op
       // Establish the manifest inode before referencing it; never overwrite an existing invalid head.
       if (missing) await withFile(backend, headFile(name), { create: true, exclusive: true }, file => file.flush());
       await backend.coordinator.syncDirectory();
-      // New databases use format 4: format 3's commit records with compact index pages. Existing format 2 and 3
-      // databases keep their format, so the versions that wrote them can still share them.
-      head = { dbsonl: 4, publication: 1, revision: 0, generation, root: null, count: 0, end: 0, seal: newGeneration() };
+      // New databases use format 5: format 4's compact pages and commit records, with index pages written at checkpoints
+      // and each commit's key changes logged in between. Existing format 2 to 4 databases keep their format, so the
+      // versions that wrote them can still share them.
+      head = { dbsonl: 5, publication: 1, revision: 0, generation, root: null, count: 0, end: 0, seal: newGeneration(), log: 0, last: null };
       await publish(backend, name, head);
       await publish(backend, name, { ...head, publication: 2 });
     }

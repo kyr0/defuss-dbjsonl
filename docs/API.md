@@ -57,8 +57,8 @@ VERIFIED: Optimistic compaction is the default. A concurrent publication yields 
 | `maxTransactionOperations` | 10000 | Batch operations or distinct staged transaction keys |
 | `maxPendingOperations` | 256 | Admitted top-level operations per database handle |
 | `maxPendingBytes` | 134217728 | Aggregate encoded-write budget per database handle |
-| `maxCacheBytes` | 8388608 | Encoded bytes represented in the page cache; format 4 pages encode about a tenth of the bytes of earlier formats, so `maxCachePages` usually binds first |
-| `maxCachePages` | 1024 | Maximum cached decoded index pages |
+| `maxCacheBytes` | 8388608 | Encoded bytes represented in the page cache; format 4 and 5 pages encode about a tenth of the bytes of earlier formats, so `maxCachePages` usually binds first |
+| `maxCachePages` | 1024 | Maximum cached decoded index pages. In format 5 also the most index pages a handle holds in memory for logged commits: a commit that would hold more writes its pages, a checkpoint |
 | `signal` | absent | Cooperative cancellation while opening |
 
 VERIFIED: There is no RAM map proportional to total live keys and no fixed live-key count limit. Budgets reject excess work rather than retain an unbounded hidden queue. The writer additionally bounds the encoded size of old index pages loaded into its dirty tree by `maxTransactionBytes`; this is a separate budget from staged values. Byte budgets exclude temporary encoder allocation, decoded object overhead, active traversal pages, caller references and memory-adapter storage. Snapshot pins are explicit resources; callers must close them. Zero cache budgets disable index caching. The fixed manifest parse cache is separate. Codec depth 512 and reference-table limit 1000000 remain DSON defaults; index pages use a separate 512 KiB codec limit. File offsets and revisions must fit safe JavaScript integers.

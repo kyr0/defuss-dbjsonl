@@ -1,6 +1,10 @@
 # Changelog
 
-## 0.8.1
+## 0.9.0
+
+VERIFIED: New databases use format 5, which writes index pages only at checkpoints. Between them, a commit appends its values, a compact list of its key changes and its record, and flushes once; the handle that wrote it keeps the changed pages in memory, and every other handle, process or worker replays the records since the last checkpoint. A commit is a checkpoint when the log reaches 16 MiB or the pages held in memory would exceed `maxCachePages`. On a 100,000-document defuss-db load with one ordered index, commits of 256 documents took 2.50 s in all instead of 3.35 to 3.92 s, a 64-document commit 4.39 ms instead of 5.89 to 6.08 ms, and the load wrote 29 to 31 MiB instead of 107 to 166 MiB. Format 2 to 4 databases keep their format; 0.8 refuses format 5 with `UNSUPPORTED`.
+
+## 0.8.1 (not published; its changes ship in 0.9.0)
 
 VERIFIED: `compact()` copies value frames instead of decoding and re-encoding each value, and reads them in file order in batches of about 4 MiB. A 100,000-document defuss-db store with one ordered index compacted in 0.25 to 0.34 s instead of 2.9 to 3.6 s on macOS under Node.js. The file format is unchanged.
 

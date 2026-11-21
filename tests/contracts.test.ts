@@ -138,9 +138,15 @@ test('a checksummed newer head of another format version fails UNSUPPORTED, an i
     const file = await backend.storage.open(headFile('manifest'));
     try { await file.write(((head.publication + 1) % 2) * SLOT_BYTES, slot); } finally { await file.close(); }
   };
-  await replace({ dbsonl: 5 });
+  await replace({ dbsonl: 6 });
   await expect(openDbsonl(backend, 'manifest')).rejects.toMatchObject({ code: 'UNSUPPORTED' });
+  // Format 5: a count that disagrees with the logged commits fails when they are replayed, at the first read; open
+  // stays O(1). A log reference past the committed end fails at open.
   await replace({ count: 0 });
+  const inconsistent = await openDbsonl<number>(backend, 'manifest');
+  await expect(inconsistent.get('a')).rejects.toMatchObject({ code: 'CORRUPT' });
+  await inconsistent.close();
+  await replace({ last: { offset: head.end, byteLength: 1 } });
   await expect(openDbsonl(backend, 'manifest')).rejects.toMatchObject({ code: 'CORRUPT' });
   await replace({ revision: -1 });
   await expect(openDbsonl(backend, 'manifest')).rejects.toMatchObject({ code: 'CORRUPT' });
