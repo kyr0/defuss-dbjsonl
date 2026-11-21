@@ -57,22 +57,12 @@ Wrap: EVERY lead becomes a test | .vae/VERIFY.py rule | one MEMORY line with BC,
 2026-11-16T19:57:55Z s=a4ea8ca3 FINDING README.md:17 (B evidence) learn=none: Prose evidence slip; not mechanically checkable.
 2026-11-16T19:57:55Z s=a4ea8ca3 FINDING docs/index.html: What you get, Guarantees, conflict demo, page-cache and several-writers cards (L logic) learn=none: Semantic doc drift; no deterministic rule distinguishes old from new wording.
 2026-11-16T19:57:55Z s=a4ea8ca3 FINDING docs/PERFORMANCE.md macOS section (B evidence) learn=none: Prose evidence slip.
-2026-11-16T21:13:21Z s=a4ea8ca3 FINDING docs/index.html:.db-vs-gauge learn=test: make e2e already fails on sideways scroll at iPhone size and now waits for both charts before measuring.
 2026-11-16T21:13:21Z s=a4ea8ca3 FINDING docs/index.html:Redis comparison script guard learn=none: A CDN outage is not reproducible in e2e without blocking the request; proportionate check would mock the network, which the project rules forbid.
 2026-11-16T21:13:21Z s=a4ea8ca3 FINDING docs/index.html:RUNS learn=none: Figures change only with a new benchmark run; a test pinning them would pin values that worked once.
-2026-11-16T22:12:24Z s=a4ea8ca3 DONE fp=5dd8028ce88f cov=98.4% paths=CHANGELOG.md,Makefile,README.md,docs/API.md(+24)
-2026-11-16T22:12:24Z s=a4ea8ca3 FINDING docs/assets/demo.js learn=verifier: scripts/e2e.ts already compares the committed bundles with a fresh build and caught it.
-2026-11-16T22:12:24Z s=a4ea8ca3 FINDING docs/API.md scanBatches paragraph (handoff wording) learn=test: tests/batches.test.ts 'invalid options throw, an oversized row fails its batch after earlier batches...'.
-2026-11-16T22:12:24Z s=a4ea8ca3 FINDING src/core/store.ts:scanBatches sizeOf learn=test: tests/batches.test.ts asserts the three rejected sizes.
 2026-11-16T22:12:24Z s=a4ea8ca3 FINDING src/index.ts:BatchScanOptions learn=none: pkgroll reports this as a warning, not an exit code; failing the build on dts warnings would be a broader tooling change.
 2026-11-16T22:12:24Z s=a4ea8ca3 FINDING src/core/io.ts:readValue, src/core/store.ts:cachedValue learn=none: Structure cleanup, no defect.
 2026-11-16T22:12:24Z s=a4ea8ca3 FINDING scripts/bench-scan.ts:record learn=none: Naming only.
-2026-11-16T22:12:24Z s=a4ea8ca3 FINDING src/core/io.ts read window on portable backends learn=test: Covered by the stable-snapshot case on memory and native storage and the OPFS worker case.
-2026-11-17T00:12:30Z s=a4ea8ca3 DONE fp=029ee2b849b2 cov=98.4% paths=CHANGELOG.md,Makefile,README.md,bun.lock(+26)
-2026-11-17T00:12:30Z s=a4ea8ca3 FINDING src/core/io.ts:readCachedValues learn=memory: A performance threshold test would pin a machine-specific value; the lesson is a .vae/MEMORY.md line and a code comment.
 2026-11-17T00:12:30Z s=a4ea8ca3 FINDING CHANGELOG.md:0.6.0 P-precision learn=none: Wording only.
-2026-11-17T00:12:30Z s=a4ea8ca3 FINDING src/core/store.ts:scanBatches run decode learn=test: Covered by the new batches test.
-2026-11-17T00:40:14Z s=a4ea8ca3 DONE fp=743c0f73c4af cov=98.4% paths=CHANGELOG.md,Makefile,README.md,bun.lock(+26)
 2026-11-17T00:40:14Z s=a4ea8ca3 FINDING src/core/io.ts:readCachedValues learn=none: Simplification; behavior covered by the existing batches test.
 2026-11-20T04:16:45Z s=ad85a3b9 FAIL tests.e2e.1
 2026-11-20T05:04:32Z s=ad85a3b9 FAIL lint
@@ -106,3 +96,13 @@ Wrap: EVERY lead becomes a test | .vae/VERIFY.py rule | one MEMORY line with BC,
 2026-11-20T13:44:20Z s=dbsonl-r DONE fp=197de4a4bb40 cov=93.5% paths=ARCH.md,CHANGELOG.md,Makefile,README.md(+49)
 2026-11-20T13:44:20Z s=dbsonl-r FINDING src/server.ts:spawnScanWorker; src/core/{common,io,tree,store}.ts constructors; tsconfig.json learn=verifier: make lint runs tsc with erasableSyntaxOnly, which rejects parameter properties, enums and namespaces, the syntax Node's type stripping cannot load.
 2026-11-20T13:45:20Z s=ad85a3b9 DONE fp=197de4a4bb40 cov=93.5% paths=ARCH.md,CHANGELOG.md,Makefile,README.md(+49)
+2026-11-20T23:08:15Z s=dbsonl-r DONE fp=1c34fc71cfe8 cov=93.5% paths=ARCH.md,CHANGELOG.md,Makefile,README.md(+50)
+2026-11-20T23:08:15Z s=dbsonl-r FINDING src/core/store.ts:remember (page cache eviction) learn=test: tests/mvcc.test.ts checks both limits at one page and 40 pages and that the cache is never emptied; removing the guard for the just-loaded page fails it (expect
+2026-11-21T00:02:09Z s=dbsonl-r DONE fp=12f1f67da5ce cov=93.8% paths=ARCH.md,CHANGELOG.md,Makefile,README.md(+52)
+2026-11-21T00:02:09Z s=dbsonl-r FINDING src/core/page.ts encodeCompactPage/decodeCompactPage, src/core/tree.ts toPage, src/core/io.ts Appender.compact, src/core/store.ts (format 4) learn=test: tests/format4.test.ts and tests/format3.test.ts cover hard keys, deletes, compaction, reopening, mismatch, malformed pages and format 3 staying format 3
+2026-11-21T00:02:09Z s=dbsonl-r FINDING tests/format3.test.ts format 2 case learn=test: the test runs on memory and native storage
+2026-11-21T00:02:09Z s=dbsonl-r FINDING src/core/page.ts decode (falsified hypothesis) learn=memory: recorded in .vae/MEMORY.md so nobody chases it again
+2026-11-21T00:02:09Z s=dbsonl-r FINDING docs/API.md maxCacheBytes, page cache charge learn=none: decoded page memory per page was not measured; reported to the human for the defuss-db upgrade
+2026-11-21T00:02:09Z s=dbsonl-r FINDING src/core/page.ts:175 oxlint unicorn/no-new-array learn=none: make lint enforces it
+2026-11-21T00:09:31Z s=dbsonl-r DONE fp=25b6fb21c135 cov=93.8% paths=ARCH.md,CHANGELOG.md,Makefile,README.md(+52)
+2026-11-21T00:09:31Z s=dbsonl-r FINDING package.json, README.md:1, CHANGELOG.md, docs/FORMAT.md, docs/index.html badge, comments in src/core/store.ts, io.ts, types.ts learn=none: version wording; the gate re-verifies the tree

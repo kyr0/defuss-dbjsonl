@@ -1,11 +1,11 @@
 /** VERIFIED: Data is flushed before a checksummed head slot makes a root visible. */
 import { FRAME_HEADER_BYTES, decodeFrame, decodeFrames, encodeFrame, inspectFrame } from 'defuss-dson/sequence';
-import { encodePage } from './page.js';
+import { encodeCompactPage, encodePage } from './page.js';
 import type { StorageFile } from 'defuss-storage';
 import { withFile, writeBytes } from './backend.js';
 import { DbsonlError, corrupt, reference, natural } from './common.js';
 import type { Limits } from './common.js';
-import type { Backend, Head, Ref } from './types.js';
+import type { Backend, Head, Page, Ref } from './types.js';
 
 export const SLOT_BYTES = 4096;
 export const generationFile = (name: string, generation: string) => `${name}.g-${generation}.dsq`;
@@ -37,8 +37,8 @@ function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
 /** The field checks of a decoded slot, also applied to a head a caller passes to beginRead. */
 export function checkHead(value: unknown): Head {
   const h = value as Head;
-  if (!h || (h.dbsonl !== 2 && h.dbsonl !== 3)) throw new DbsonlError('UNSUPPORTED', 'Unsupported database manifest version.');
-  if (h.dbsonl === 3 ? typeof h.seal !== 'string' || !/^[0-9a-f]{32}$/.test(h.seal) : h.seal !== undefined) corrupt('Invalid manifest seal.');
+  if (!h || (h.dbsonl !== 2 && h.dbsonl !== 3 && h.dbsonl !== 4)) throw new DbsonlError('UNSUPPORTED', 'Unsupported database manifest version.');
+  if (h.dbsonl >= 3 ? typeof h.seal !== 'string' || !/^[0-9a-f]{32}$/.test(h.seal) : h.seal !== undefined) corrupt('Invalid manifest seal.');
   if (!Number.isSafeInteger(h.publication) || h.publication < 1 || !Number.isSafeInteger(h.revision) || h.revision < 0 || !Number.isSafeInteger(h.count) || h.count < 0 || !Number.isSafeInteger(h.end) || h.end < 0 || typeof h.generation !== 'string' || !/^[0-9a-f]{32}$/.test(h.generation)) corrupt('Invalid manifest fields.');
   if (h.root !== null) reference(h.root, h.end);
   if ((h.root === null) !== (h.count === 0)) corrupt('Empty root and count disagree.');
@@ -79,7 +79,7 @@ export async function readHead(backend: Backend, name: string, cache?: HeadCache
  * Publish exactly one slot. A failed call has an uncertain commit outcome; reopen to resolve it.
  * Publication only overwrites a slot of an existing file, so it needs no directory sync: callers
  * sync the directory after creating or removing a file, before any head refers to it. With flush false the slot
- * is written but not flushed: format 3 commits on coherent storage, whose generation flush already made the commit
+ * is written but not flushed: format 3 and 4 commits on coherent storage, whose generation flush already made the commit
  * durable and whose record lets recovery rebuild a lost slot.
  */
 export async function publish(backend: Backend, name: string, head: Head, cache?: HeadCache, flush = true): Promise<void> {
@@ -110,23 +110,23 @@ export function crc32c(bytes: Uint8Array): number {
 /** A commit record is small: a few numbers, a root reference and the 32-digit seal. */
 const RECORD_BYTES = 1024;
 /**
- * Format 3: the last frame of every commit, after its values and pages. One flush of the generation makes the
+ * Formats 3 and 4: the last frame of every commit, after its values and pages. One flush of the generation makes the
  * commit durable; the head slot written afterwards is a hint that recovery can rebuild from these records.
  * offset is the record's own position and prev the end of the commit before it, so a record copied elsewhere,
  * or one whose commit is incomplete, does not chain; seal is secret to the files, so a stored value cannot pose
  * as a record.
  */
 export function commitRecord(head: Head, offset: number, prev: number): Uint8Array {
-  return encodeFrame({ dbsonl: 3, seal: head.seal, publication: head.publication, revision: head.revision, root: head.root, count: head.count, offset, prev }, { maxRecordBytes: RECORD_BYTES - 16, trusted: true });
+  return encodeFrame({ dbsonl: head.dbsonl, seal: head.seal, publication: head.publication, revision: head.revision, root: head.root, count: head.count, offset, prev }, { maxRecordBytes: RECORD_BYTES - 16, trusted: true });
 }
 /**
- * Format 3 recovery: the head on disk can be older than the last durable commit, because commits flush only the
+ * Format 3 and 4 recovery: the head on disk can be older than the last durable commit, because commits flush only the
  * generation. Walk the frames after head.end and return the head of the last commit whose record chains to the
  * one before and whose frames all decode, or undefined. A torn or damaged frame ends the walk: a commit counts
  * only if every frame up to its record survived, whatever order the device wrote the blocks of its flush in.
  */
 export async function recoverTail(file: StorageFile, head: Head, size: number): Promise<Head | undefined> {
-  if (head.dbsonl !== 3) return undefined;
+  if (head.dbsonl < 3) return undefined;
   let position = head.end, prev = head.end, found: Head | undefined;
   while (position + FRAME_HEADER_BYTES <= size) {
     let frame: { byteLength: number; payloadOffset: number; payloadLength: number; checksum: number };
@@ -140,9 +140,9 @@ export async function recoverTail(file: StorageFile, head: Head, size: number): 
     let value: unknown;
     try { value = decodeFrame(bytes, 0, { maxRecordBytes: RECORD_BYTES, maxDepth: 512, maxReferences: 1_000_000 }).value; } catch { break; }
     const record = value as Partial<Head> & { offset?: unknown; prev?: unknown };
-    if (record && typeof record === 'object' && record.dbsonl === 3 && record.seal === head.seal && record.offset === position && record.prev === prev) {
+    if (record && typeof record === 'object' && record.dbsonl === head.dbsonl && record.seal === head.seal && record.offset === position && record.prev === prev) {
       let next: Head;
-      try { next = checkHead({ dbsonl: 3, seal: head.seal, publication: record.publication, revision: record.revision, generation: head.generation, root: record.root, count: record.count, end: position + length }); }
+      try { next = checkHead({ dbsonl: head.dbsonl, seal: head.seal, publication: record.publication, revision: record.revision, generation: head.generation, root: record.root, count: record.count, end: position + length }); }
       catch { break; }
       if (next.publication <= (found ?? head).publication) break;
       found = next; prev = next.end;
@@ -225,8 +225,10 @@ export class Appender {
   readonly file: StorageFile;
   readonly limits: Limits;
   private readonly chunkSize: number;
-  constructor(file: StorageFile, end: number, limits: Limits, chunkSize: number) {
-    this.file = file; this.limits = limits; this.chunkSize = chunkSize;
+  /** Format 4: index pages use the compact encoding. */
+  readonly compact: boolean;
+  constructor(file: StorageFile, end: number, limits: Limits, chunkSize: number, compact = false) {
+    this.file = file; this.limits = limits; this.chunkSize = chunkSize; this.compact = compact;
     this.end = end; this.flushedEnd = end; this.buffer = new Uint8Array(Math.min(chunkSize, 65536));
   }
   /** Coalesce small frames, but preserve the data-before-manifest durability barrier. */
@@ -251,7 +253,8 @@ export class Appender {
   }
   async value(value: unknown, page = false): Promise<Ref> {
     // Index pages are engine-built plain data with known property names; caller values keep encodeFrame's checks.
-    return this.bytes(page ? encodePage(value as object, PAGE_BYTES) : encodeFrame(value, { maxRecordBytes: this.limits.maxRecordBytes }));
+    if (!page) return this.bytes(encodeFrame(value, { maxRecordBytes: this.limits.maxRecordBytes }));
+    return this.bytes(this.compact ? encodeFrame(encodeCompactPage(value as Page), { maxRecordBytes: PAGE_BYTES, trusted: true }) : encodePage(value as object, PAGE_BYTES));
   }
   /** Committed pages only: the writer's own handle is exclusive, so it cannot reopen the file. */
   async read<T>(ref: Ref): Promise<T> {

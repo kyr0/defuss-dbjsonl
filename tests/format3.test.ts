@@ -1,9 +1,12 @@
-/** Format 3: one generation flush per commit, with commit records that rebuild a head whose slot never reached the disk. */
+/**
+ * Formats 3 and 4: one generation flush per commit, with commit records that rebuild a head whose slot never reached the
+ * disk. New databases are format 4, which adds compact index pages to format 3's records.
+ */
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { encodeFrame, inspectFrame } from 'defuss-dson/sequence';
+import { decodeFrame, encodeFrame, inspectFrame } from 'defuss-dson/sequence';
 import { createMemoryBackend, openDbsonl } from '../src/index.js';
 import type { Backend } from '../src/index.js';
 import { createFileBackend } from '../src/server.js';
@@ -24,18 +27,36 @@ async function restore(backend: Backend, name: string, data: Uint8Array): Promis
   const file = await backend.storage.open(name);
   try { await file.truncate(0); await file.write(0, data); await file.flush(); } finally { await file.close(); }
 }
+/**
+ * An empty database whose head an older version wrote: format 2 without a seal, or format 3 with one. Converted before
+ * any write, so every page the test writes uses that format's encoding.
+ */
+async function older(backend: Backend, name: string, format: 2 | 3): Promise<void> {
+  await (await openDbsonl<number>(backend, name, { create: true })).close();
+  const head = await readHead(backend, name), { seal, ...rest } = head;
+  const slots = new Uint8Array(SLOT_BYTES * 2);
+  for (const publication of [head.publication, head.publication + 1])
+    slots.set(encodeFrame({ ...rest, dbsonl: format, publication, ...(format === 3 && { seal }) }), (publication % 2) * SLOT_BYTES);
+  await restore(backend, headFile(name), slots);
+}
+/** The decoded frame of the root page: a DSON object in formats 2 and 3, compact bytes in format 4. */
+async function rootPage(backend: Backend, name: string): Promise<unknown> {
+  const head = await readHead(backend, name), root = head.root!;
+  const data = await bytes(backend, generationFile(name, head.generation));
+  return decodeFrame(data.subarray(root.offset, root.offset + root.byteLength), 0, { maxRecordBytes: 1 << 20, maxDepth: 16, maxReferences: 1 << 16 }).value;
+}
 async function truncate(backend: Backend, name: string, size: number): Promise<void> {
   const file = await backend.storage.open(name);
   try { await file.truncate(size); await file.flush(); } finally { await file.close(); }
 }
 
 for (const [kind, make] of backends) {
-  test(`${kind}: new databases use format 3, and reopening adopts commits whose head slot was lost`, async () => {
+  test(`${kind}: new databases use format 4, and reopening adopts commits whose head slot was lost`, async () => {
     const backend = await make();
     let db = await openDbsonl<unknown>(backend, 'lost', { create: true });
     await db.put('a', 1);
     const head = await readHead(backend, 'lost');
-    expect(head.dbsonl).toBe(3); expect(head.seal).toMatch(/^[0-9a-f]{32}$/);
+    expect(head.dbsonl).toBe(4); expect(head.seal).toMatch(/^[0-9a-f]{32}$/);
     const early = await bytes(backend, headFile('lost'));
     await db.put('b', 2);
     // A stored value shaped like a commit record, with a seal it cannot know, stays a value.
@@ -101,7 +122,7 @@ for (const [kind, make] of backends) {
     expect((await b.get('y')).value).toBe(2);
     await b.compact(); await b.collect();
     expect(await b.verify()).toMatchObject({ count: 3, revision: 3 });
-    expect((await readHead(backend, 'crash')).dbsonl).toBe(3);
+    expect((await readHead(backend, 'crash')).dbsonl).toBe(4);
     await b.close();
   });
 
@@ -121,17 +142,25 @@ for (const [kind, make] of backends) {
     await b.close();
   });
 
+  test(`${kind}: a format 3 database keeps format 3, its commit records and DSON object pages`, async () => {
+    const backend = await make();
+    await older(backend, 'three', 3);
+    const db = await openDbsonl<number>(backend, 'three');
+    await db.batch(Array.from({ length: 300 }, (_, n) => ({ operation: 'put' as const, key: `k${n}`, value: n })));
+    expect(await rootPage(backend, 'three')).toMatchObject({ kind: 'branch' });
+    await db.compact({ mode: 'exclusive' });
+    const head = await readHead(backend, 'three');
+    expect(head.dbsonl).toBe(3); expect(head.seal).toMatch(/^[0-9a-f]{32}$/);
+    expect(await rootPage(backend, 'three')).toMatchObject({ kind: 'branch' });
+    await db.put('k300', 300);
+    expect(await db.verify()).toMatchObject({ count: 301 });
+    await db.close();
+  });
   test(`${kind}: a format 2 database keeps format 2 and writes no commit records`, async () => {
     const backend = await make();
-    let db = await openDbsonl<number>(backend, 'legacy', { create: true });
-    await db.put('a', 1); await db.close();
-    // Rewrite both slots as format 2, as an older version would have written them.
-    const head = await readHead(backend, 'legacy'), { seal: _seal, ...rest } = head;
-    const slots = new Uint8Array(SLOT_BYTES * 2);
-    for (const publication of [head.publication, head.publication + 1]) slots.set(encodeFrame({ ...rest, dbsonl: 2, publication }), (publication % 2) * SLOT_BYTES);
-    await restore(backend, headFile('legacy'), slots);
-    db = await openDbsonl(backend, 'legacy');
-    await db.put('b', 2);
+    await older(backend, 'legacy', 2);
+    let db = await openDbsonl<number>(backend, 'legacy');
+    await db.put('a', 1); await db.put('b', 2);
     const after = await readHead(backend, 'legacy');
     expect(after.dbsonl).toBe(2); expect(after.seal).toBeUndefined();
     // Without records, a lost head slot is a lost commit for format 2, so its commits keep flushing the head.

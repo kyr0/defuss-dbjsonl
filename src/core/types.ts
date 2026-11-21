@@ -29,7 +29,7 @@ export interface Backend {
   read?(name: string, offset: number, length: number): Promise<Uint8Array>;
   /**
    * Optional: a write is visible to every handle and process on these files before it is flushed, as POSIX page
-   * caches are. Format 3 commits then flush only the generation and write the head slot without a flush.
+   * caches are. Format 3 and 4 commits then flush only the generation and write the head slot without a flush.
    */
   readonly coherent?: boolean;
   /** Optional worker threads that scanBatches uses for snapshots of at least threshold rows. */
@@ -69,11 +69,14 @@ export interface Ref { offset: number; byteLength: number }
 export interface Entry { key: string; ref: Ref; revision: number }
 export interface Child { max: string; ref: Ref; count: number }
 export type Page = { kind: 'leaf'; entries: Entry[] } | { kind: 'branch'; children: Child[] };
-/** Format 2 flushes the head on every commit. Format 3 seals each commit with a record in the generation; see FORMAT.md. */
+/**
+ * Format 2 flushes the head on every commit. Format 3 seals each commit with a record in the generation. Format 4 adds
+ * compact index pages to format 3; see FORMAT.md.
+ */
 export interface Head {
-  dbsonl: 2 | 3; publication: number; revision: number; generation: string;
+  dbsonl: 2 | 3 | 4; publication: number; revision: number; generation: string;
   root: Ref | null; count: number; end: number;
-  /** Format 3: the generation's random seal, which a commit record must repeat. */
+  /** Formats 3 and 4: the generation's random seal, which a commit record must repeat. */
   seal?: string;
 }
 export type Mutation<T> = { operation: 'put'; key: string; value: T } | { operation: 'delete'; key: string };

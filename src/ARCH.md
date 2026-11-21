@@ -2,7 +2,7 @@
 
 VERIFIED: The package has three entries because the platform capabilities they need cannot share one bundle. `index.ts` exports the portable engine and the memory backend; its declarations compile with neither Node nor DOM ambient types, so any runtime can import it. `server.ts` adds kernel locks and directory sync for Node.js and Bun. `browser.ts` adapts Web Locks through a structural interface. A single entry with runtime detection would pull the native addon and `node:fs` into browser bundles.
 
-VERIFIED: `core/` owns formats 2 and 3 and their commit protocol and imports no platform API. Platform code reaches it only through the `Backend` contract in `core/types.ts`, so a new platform needs a backend, not engine changes.
+VERIFIED: `core/` owns formats 2, 3 and 4 and their commit protocol and imports no platform API. Platform code reaches it only through the `Backend` contract in `core/types.ts`, so a new platform needs a backend, not engine changes.
 
 VERIFIED: `kept-files.ts` keeps the native head and generation files open between commits for every handle of a database in the JS realm; it lives beside the native backend because only native Storage has shared writers whose size follows other processes' writes (ARCH.md, read descriptors).
 

@@ -138,7 +138,7 @@ test('a checksummed newer head of another format version fails UNSUPPORTED, an i
     const file = await backend.storage.open(headFile('manifest'));
     try { await file.write(((head.publication + 1) % 2) * SLOT_BYTES, slot); } finally { await file.close(); }
   };
-  await replace({ dbsonl: 4 });
+  await replace({ dbsonl: 5 });
   await expect(openDbsonl(backend, 'manifest')).rejects.toMatchObject({ code: 'UNSUPPORTED' });
   await replace({ count: 0 });
   await expect(openDbsonl(backend, 'manifest')).rejects.toMatchObject({ code: 'CORRUPT' });

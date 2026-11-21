@@ -1,6 +1,7 @@
 /** VERIFIED: Copy-on-write B+tree paths keep old snapshot roots immutable. */
 import type { Child, Entry, Page, Partition, Ref } from './types.js';
 import { corrupt, key, reference, natural, DbsonlError } from './common.js';
+import { decodeCompactPage } from './page.js';
 import type { Appender } from './io.js';
 export const FANOUT = 32;
 export type LoadPage = (ref: Ref) => Page | Promise<Page>;
@@ -23,6 +24,11 @@ export function validatePage(value: unknown, ref: Ref): Page {
     if (!Number.isSafeInteger(count) || count < 1) corrupt('Invalid index count or revision.');
   }
   return page;
+}
+/** A decoded page frame: format 4 stores compact bytes, earlier formats a DSON object; any other shape is corrupt. */
+export function toPage(value: unknown, ref: Ref, compact: boolean): Page {
+  if (compact !== value instanceof Uint8Array) corrupt('Index page encoding does not match the database format.');
+  return validatePage(compact ? decodeCompactPage(value as Uint8Array) : value, ref);
 }
 /** Store one page and its parent's routing summary. */
 async function save(writer: Appender, page: Page): Promise<Child> {
@@ -149,7 +155,7 @@ export class BatchTree {
   apply(key: string, entry: Entry | undefined): void | Promise<void> {
     const ref = this.missing(key);
     if (!ref) { this.edit(key, entry); return; }
-    return this.writer.read<unknown>(ref).then(value => { this.fetched.set(ref, validatePage(value, ref)); return this.apply(key, entry); });
+    return this.writer.read<unknown>(ref).then(value => { this.fetched.set(ref, toPage(value, ref, this.writer.compact)); return this.apply(key, entry); });
   }
   private edit(key: string, entry: Entry | undefined): void {
     const edit = (link: Link | null, depth: number): Route[] => {

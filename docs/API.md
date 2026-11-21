@@ -1,4 +1,4 @@
-# API (formats 2 and 3)
+# API (formats 2, 3 and 4)
 
 VERIFIED: All methods return promises unless listed as synchronous. Runtime values use DSON, including binary views, dates, bigint, undefined and cyclic references. Generic `T` describes application values; DBSONL does not perform application schema validation.
 
@@ -57,7 +57,7 @@ VERIFIED: Optimistic compaction is the default. A concurrent publication yields 
 | `maxTransactionOperations` | 10000 | Batch operations or distinct staged transaction keys |
 | `maxPendingOperations` | 256 | Admitted top-level operations per database handle |
 | `maxPendingBytes` | 134217728 | Aggregate encoded-write budget per database handle |
-| `maxCacheBytes` | 8388608 | Encoded bytes represented in the page cache |
+| `maxCacheBytes` | 8388608 | Encoded bytes represented in the page cache; format 4 pages encode about a tenth of the bytes of earlier formats, so `maxCachePages` usually binds first |
 | `maxCachePages` | 1024 | Maximum cached decoded index pages |
 | `signal` | absent | Cooperative cancellation while opening |
 
@@ -71,7 +71,7 @@ VERIFIED: There is no RAM map proportional to total live keys and no fixed live-
 | `QUEUE_FULL` | Per-handle admission exhausted; await existing work before retrying |
 | `LIMIT_EXCEEDED` | Staging exceeds a configured transaction budget |
 | `ABORTED` | Cancellation observed before publication started |
-| `COMMIT_UNCERTAIN` | Publication or its flush failed, or publishing recovered format 3 commits failed; the commit may be durable, so inspect the current revision before retrying |
+| `COMMIT_UNCERTAIN` | Publication or its flush failed, or publishing recovered format 3 or 4 commits failed; the commit may be durable, so inspect the current revision before retrying |
 | `CORRUPT` | Invalid committed bytes, schema, ordering or addresses; preserve files for diagnosis |
 | `UNSUPPORTED` | Unsupported manifest version or unavailable required platform primitive |
 | `CLOSED` | Database, snapshot or completed transaction rejects new work |

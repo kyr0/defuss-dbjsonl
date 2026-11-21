@@ -146,3 +146,16 @@ test('long keys remain addressable and a dirty-page budget cannot publish a part
   expect(await db.verify()).toEqual({ revision: 1, count: 80 });
   await bounded.close(); await db.close();
 });
+
+test('a full page cache evicts in passes, stays within its limit and keeps the page it just loaded', async () => {
+  for (const maxCachePages of [1, 40]) {
+    const db = await openDbsonl<number>(createMemoryBackend(), 'cache', { create: true, maxCachePages });
+    for (let round = 0; round < 20; round++)
+      await db.batch(Array.from({ length: 200 }, (_, n) => ({ operation: 'put' as const, key: `k${String((round * 7919 + n * 104729) % 100000).padStart(5, '0')}`, value: n })));
+    for (let n = 0; n < 50; n++) expect((await db.get(`k${String((n * 104729) % 100000).padStart(5, '0')}`)).found).toBe(true);
+    const { cachePages } = await db.stats();
+    expect(cachePages).toBeGreaterThan(0);
+    expect(cachePages).toBeLessThanOrEqual(maxCachePages);
+    await db.close();
+  }
+});

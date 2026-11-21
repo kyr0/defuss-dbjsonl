@@ -6,7 +6,7 @@ import { DbsonlError, abort, key, name as validateName, options as resolveOption
 import type { Limits } from './common.js';
 import { Appender, checkHead, commitRecord, generationFile, headFile, publish, readHead, recoverTail, readValue, readCachedValue, readCachedValues, windowContains, PAGE_BYTES } from './io.js';
 import type { HeadCache, ReadWindow } from './io.js';
-import { entries, entryPages, find, keyAt, split, validatePage, BulkTree, BatchTree } from './tree.js';
+import { entries, entryPages, find, keyAt, split, toPage, BulkTree, BatchTree } from './tree.js';
 import type { Backend, Entry, Head, Page, ParallelScan, Partition, ReadOptions, Ref, Release, Options, Lookup, Row, ScanOptions, BatchScanOptions, Mutation, Commit, CommitOptions, Stats, Transaction } from './types.js';
 
 type Encoded = { key: string; bytes: Uint8Array | undefined };
@@ -15,8 +15,10 @@ interface ReadSet { snapshot: number; keys: Map<string, number>; whole: boolean 
 /** One queued commit. done guards against settling twice when a group falls back to single commits. */
 interface Member { input: Encoded[]; ifRevision: number | undefined; reads: ReadSet | undefined; signal: CancellationSignal | undefined; done: boolean; resolve(commit: Commit): void; reject(error: unknown): void }
 const GROUP_MEMBERS = 64;
-/** Format 3 on coherent storage flushes the head slot once this many generation bytes went by without it; recovery reads at most about this much. */
+/** Formats 3 and 4 on coherent storage flush the head slot once this many generation bytes went by without it; recovery reads at most about this much. */
 const HEAD_FLUSH_BYTES = 16 * 1024 * 1024;
+/** A full page cache evicts down to this share of its limits, so one Map iterator serves many evictions. */
+const LOW_WATER = 0.9;
 /** Thrown inside a commit that found durable commits after the head; the group is checked again against them. */
 class Recovered { readonly head: Head; constructor(head: Head) { this.head = head; } }
 /** Every supported runtime (Node, Bun, browser workers) has these; the ES2022 lib does not declare them. */
@@ -232,7 +234,7 @@ export class Dbsonl<T = unknown> {
   private arrival: (() => void) | undefined;
   /** Wall time of the last group publication in ms, which bounds gather(). */
   private groupCost = 0;
-  /** Format 3: the generation end of this handle's last flushed head slot; see HEAD_FLUSH_BYTES. */
+  /** Formats 3 and 4: the generation end of this handle's last flushed head slot; see HEAD_FLUSH_BYTES. */
   private headFlushed = 0;
   /** The backend's scan workers, bound to this database's name and decoder budgets. */
   private readonly scanner: SessionSource<T>['parallel'];
@@ -269,7 +271,7 @@ export class Dbsonl<T = unknown> {
   }
   /** The cold path alone allocates an asynchronous load operation. */
   private async loadUncached(head: Readonly<Head>, ref: Ref, id: string): Promise<Page> {
-    return this.remember(id, validatePage(await readValue(this.backend, this.name, head, ref, PAGE_BYTES), ref), ref.byteLength);
+    return this.remember(id, toPage(await readValue(this.backend, this.name, head, ref, PAGE_BYTES), ref, head.dbsonl === 4), ref.byteLength);
   }
   private remember(id: string, page: Page, bytes: number): Page {
     if (bytes > this.limits.maxCacheBytes || !this.limits.maxCachePages) return page;
@@ -277,11 +279,18 @@ export class Dbsonl<T = unknown> {
     const existing = this.cache.get(id); if (existing) return existing.page;
     // Marked on insert: in an A/B of four memory writers this was slightly faster than leaving new pages unmarked.
     this.cache.set(id, { page, bytes, used: true }); this.cacheBytes += bytes;
-    while (this.cacheBytes > this.limits.maxCacheBytes || this.cache.size > this.limits.maxCachePages) {
-      const [oldest, entry] = this.cache.entries().next().value!;
-      this.cache.delete(oldest);
-      // Each pass clears a mark, so the loop ends within one round over the cache.
-      if (entry.used) { entry.used = false; this.cache.set(oldest, entry); } else this.cacheBytes -= entry.bytes;
+    if (this.cacheBytes <= this.limits.maxCacheBytes && this.cache.size <= this.limits.maxCachePages) return page;
+    // One iterator per eviction pass, down to a low-water mark. VERIFIED: a fresh entries() per evicted page walks the
+    // slots earlier deletes left at the front of the Map: 4.3 µs per eviction at 10,000 pages against 0.2 µs with one
+    // iterator, and 4.3-5.4 ms of a 327-page commit against 0.3 ms.
+    const bytesMark = this.limits.maxCacheBytes * LOW_WATER, pagesMark = this.limits.maxCachePages * LOW_WATER;
+    for (const [key, entry] of this.cache) {
+      if (this.cacheBytes <= bytesMark && this.cache.size <= pagesMark) break;
+      if (key === id) continue;
+      this.cache.delete(key);
+      // A marked page moves to the back with its mark cleared; this pass evicts it on its second visit only if the
+      // cache is still above the mark, so every page is visited at most twice and the loop ends.
+      if (entry.used) { entry.used = false; this.cache.set(key, entry); } else this.cacheBytes -= entry.bytes;
     }
     return page;
   }
@@ -476,13 +485,13 @@ export class Dbsonl<T = unknown> {
         const size = await file.size();
         if (size < head.end) corrupt('Committed generation is truncated.');
         if (size > head.end) {
-          // Format 3: durable commits whose head slot never reached the disk come first.
+          // Formats 3 and 4: durable commits whose head slot never reached the disk come first.
           const found = await recoverTail(file, head, size);
           if (found) throw new Recovered(found);
           // An interrupted, unpublished transaction owns only bytes after this boundary.
           await file.truncate(head.end);
         }
-        const writer = new Appender(file, head.end, this.limits, this.backend.writeChunkBytes);
+        const writer = new Appender(file, head.end, this.limits, this.backend.writeChunkBytes, head.dbsonl === 4);
         // A group holds no more operations than one batch may, so one batch's page budget applies; a group
         // that still exceeds it falls back to single commits below.
         const tree = new BatchTree(writer, head.root, head.count, this.limits.maxTransactionBytes, ref => this.cached(pageId(head, ref)));
@@ -499,7 +508,7 @@ export class Dbsonl<T = unknown> {
         }
         const { root, count } = await tree.finish();
         const published: Head = { ...head, publication: natural(head.publication + 1, 'publication'), revision, root, count, end: writer.end };
-        if (head.dbsonl === 3) {
+        if (head.dbsonl >= 3) {
           // The record goes last, so a flush that reaches the device out of order cannot seal a commit whose frames are missing.
           const ref = writer.bytes(commitRecord(published, writer.end, head.end)); if (ref instanceof Promise) await ref;
           published.end = writer.end;
@@ -510,9 +519,9 @@ export class Dbsonl<T = unknown> {
       });
       // Cancellation is no longer observed once publication starts: a successful commit gets a receipt.
       publishing = true;
-      // Format 3 on coherent storage: the generation flush made the commit durable, and every process sees the slot
+      // Formats 3 and 4 on coherent storage: the generation flush made the commit durable, and every process sees the slot
       // written below at once; flushing it too would double the cost of a lone commit.
-      const flush = !(next.head.dbsonl === 3 && this.backend.coherent) || next.head.end - this.headFlushed >= HEAD_FLUSH_BYTES;
+      const flush = !(next.head.dbsonl >= 3 && this.backend.coherent) || next.head.end - this.headFlushed >= HEAD_FLUSH_BYTES;
       try { await publish(this.backend, this.name, next.head, this.headCache, flush); if (flush) this.headFlushed = next.head.end; }
       catch (cause) { this.lockedHead = undefined; throw new DbsonlError('COMMIT_UNCERTAIN', 'Head publication failed; read the current revision before retrying.', { cause }); }
       this.lockedHead = next.head;
@@ -537,10 +546,10 @@ export class Dbsonl<T = unknown> {
       for (const member of group) if (!member.done) member.reject(error);
     }
   }
-  /** Under the commit lock: the published head, after adopting format 3 commits whose head slot did not reach the disk. */
+  /** Under the commit lock: the published head, after adopting format 3 or 4 commits whose head slot did not reach the disk. */
   private async settledHead(): Promise<Head> {
     const head = await readHead(this.backend, this.name, this.headCache);
-    if (head.dbsonl !== 3) return head;
+    if (head.dbsonl < 3) return head;
     const found = await withFile(this.backend, generationFile(this.name, head.generation), { readOnly: true }, async file => {
       const size = await file.size();
       return size > head.end ? recoverTail(file, head, size) : undefined;
@@ -699,7 +708,7 @@ export class Dbsonl<T = unknown> {
         if (options.mode === 'exclusive') { outerRelease = await this.backend.coordinator.acquire(`commit-${this.name}`, false, options.signal); await prepare(); }
         else await locked(this.backend, `commit-${this.name}`, prepare, options.signal);
         const next = await withFile(this.backend, filename, { create: true, exclusive: true }, async file => {
-          const writer = new Appender(file, 0, this.limits, this.backend.writeChunkBytes); const tree = new BulkTree(writer);
+          const writer = new Appender(file, 0, this.limits, this.backend.writeChunkBytes, head.dbsonl === 4); const tree = new BulkTree(writer);
           const window: ReadWindow = {};
           for await (const entry of entries(ref => this.load(head, ref), head.root)) {
             abort(options.signal);
@@ -711,7 +720,7 @@ export class Dbsonl<T = unknown> {
           await writer.flush();
           await file.flush();
           // A new generation gets a new seal: no record copied from the old one can chain in the new file.
-          return { ...head, ...packed, generation, end: writer.end, publication: natural(head.publication + 1, 'publication'), ...(head.dbsonl === 3 && { seal: newGeneration() }) };
+          return { ...head, ...packed, generation, end: writer.end, publication: natural(head.publication + 1, 'publication'), ...(head.dbsonl >= 3 && { seal: newGeneration() }) };
         });
         await this.backend.coordinator.syncDirectory();
         const install = async () => {
@@ -794,8 +803,9 @@ export async function openDbsonl<T = unknown>(backend: Backend, name: string, op
       // Establish the manifest inode before referencing it; never overwrite an existing invalid head.
       if (missing) await withFile(backend, headFile(name), { create: true, exclusive: true }, file => file.flush());
       await backend.coordinator.syncDirectory();
-      // New databases use format 3, which seals each commit in the generation; existing format 2 databases keep theirs.
-      head = { dbsonl: 3, publication: 1, revision: 0, generation, root: null, count: 0, end: 0, seal: newGeneration() };
+      // New databases use format 4: format 3's commit records with compact index pages. Existing format 2 and 3
+      // databases keep their format, so the versions that wrote them can still share them.
+      head = { dbsonl: 4, publication: 1, revision: 0, generation, root: null, count: 0, end: 0, seal: newGeneration() };
       await publish(backend, name, head);
       await publish(backend, name, { ...head, publication: 2 });
     }
@@ -803,7 +813,7 @@ export async function openDbsonl<T = unknown>(backend: Backend, name: string, op
     const found = await withFile(backend, generationFile(name, opened.generation), { readOnly: true }, async file => {
       const size = await file.size();
       if (size < opened.end) corrupt('Committed generation is truncated.');
-      // Format 3: a power loss can leave the head older than the last durable commit; adopt those commits now.
+      // Formats 3 and 4: a power loss can leave the head older than the last durable commit; adopt those commits now.
       return size > opened.end ? recoverTail(file, opened, size) : undefined;
     });
     if (found) await publish(backend, name, found);

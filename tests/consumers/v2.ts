@@ -46,5 +46,5 @@ try {
   await db.close();
   const reopened = await openDbsonl(await createFileBackend(root), 'multi');
   assert.equal((await reopened.stats()).cachePages, 0); await reopened.verify(); await reopened.close();
-  console.log(JSON.stringify({ multiProcess: 'Node and Bun, v0.2 and current concurrently on a format 2 database; v0.2 refuses format 3', increments: 60, killedProcesses, atomicCrashBatches: 3, reopen: 'persistent index' }));
+  console.log(JSON.stringify({ multiProcess: 'Node and Bun, v0.2 and current concurrently on a format 2 database; v0.2 refuses format 4', increments: 60, killedProcesses, atomicCrashBatches: 3, reopen: 'persistent index' }));
 } finally { for (const worker of children) worker.process.kill('SIGKILL'); await rm(root, { recursive: true, force: true }); }
